@@ -1,10 +1,10 @@
 # tay_weather_bot.py
 #
 # Tay Township Weather Bot
-# - Pulls Environment Canada (Weather Canada) CAP alerts from Datamart
-# - Filters to Tay-area regions (Victoria Harbour, Port McNicoll, Waubaushene, Waverley + EC region names)
+# - Pulls Environment Canada CAP alerts from Datamart
+# - Filters to Tay-area regions (strict allow-list match on CAP <areaDesc>)
 # - Writes RSS feed: tay-weather.xml
-# - Posts to X (Twitter / X) automatically using OAuth 2.0 (refresh token)
+# - Posts to X automatically using OAuth 2.0 (refresh token)
 # - Supports cooldowns + dedupe + "all clear" follow-up for Cancel messages
 #
 # REQUIRED GitHub Secrets (repo Settings > Secrets and variables > Actions):
@@ -18,10 +18,6 @@
 # Files:
 #   state.json        -> auto-maintained; tracks seen CAP IDs, posted GUIDs, cooldowns
 #   tay-weather.xml   -> RSS output
-#
-# Notes:
-# - IMPORTANT: Environment Canada CAP areaDesc uses official region names (ex: "Midland - Coldwater - Orr Lake").
-#   Hamlet names may not appear. Add exact region strings you see inside CAP <areaDesc> to AREA_KEYWORDS.
 #
 import base64
 import json
@@ -45,8 +41,7 @@ from bs4 import BeautifulSoup
 INCLUDE_SPECIAL_WEATHER_STATEMENTS = True
 INCLUDE_ALERTS = True  # warnings/watches/advisories etc.
 
-# If True: match only on CAP <areaDesc> (recommended; prevents unrelated alerts).
-# If False: also match on headline/description fallback (can create false positives).
+# If True: require CAP <areaDesc> to match allow-list (recommended).
 STRICT_AREA_MATCH = True
 
 # Post to X. If you only want RSS, set False.
@@ -64,21 +59,14 @@ EXCLUDED_EVENTS = {
 # ----------------------------
 # Tay / target areas
 # ----------------------------
-# IMPORTANT:
-# - With STRICT_AREA_MATCH=True, these should reflect EC region names appearing in CAP <areaDesc>.
-# - Hamlet names can stay as "nice-to-have", but they often won't match areaDesc.
-AREA_KEYWORDS = [
-    # Tay hamlets (may not appear in CAP areaDesc)
-    "Victoria Harbour",
-    "Port McNicoll",
-    "Waubaushene",
-    "Waverley",
-
-    # Common EC region names that can cover Tay-area communities (UPDATE based on real CAP files)
+# Strict allow-list for CAP <areaDesc>. Only these areaDesc values will pass.
+# Add additional *exact* strings you see inside CAP <areaDesc> when you encounter them.
+AREA_ALLOWLIST = [
+    # Land
     "Midland - Coldwater - Orr Lake",
-    "Midland - Penetanguishene",
+
+    # Marine
     "Southern Georgian Bay",
-    "Georgian Bay",
 ]
 
 # CAP Datamart offices
@@ -95,10 +83,12 @@ STATE_PATH = "state.json"
 RSS_PATH = "tay-weather.xml"
 
 USER_AGENT = "tay-weather-rss-bot/1.0"
-MORE_INFO_URL = "https://weather.gc.ca/warnings/index_e.html?prov=on"
+
+# Use your preferred “more info” URL:
+MORE_INFO_URL = "https://weather.gc.ca/?zoom=11&center=44.80743105,-79.69598152"
 
 # ----------------------------
-# Cooldown policy (recommended)
+# Cooldown policy
 # ----------------------------
 COOLDOWN_MINUTES = {
     "warning": 60,
@@ -116,7 +106,6 @@ GLOBAL_COOLDOWN_MINUTES = 5
 # ----------------------------
 # X templates
 # ----------------------------
-# Keep these concise; bot will trim to 280.
 TWEET_TEMPLATES = {
     "alert": (
         "⚠️ {event_label} for {areas_short}\n"
@@ -313,21 +302,17 @@ def should_include_event(cap: Dict[str, Any]) -> bool:
 
 
 def area_matches(cap: Dict[str, Any]) -> bool:
+    """
+    Strict allow-list match on CAP <areaDesc>.
+    This prevents unrelated Ontario regions from being posted (eg, Lambton).
+    """
     areas = cap.get("areas", []) or []
-    hay_area = normalize(" | ".join(areas))
-
     if STRICT_AREA_MATCH and not areas:
         return False
 
-    fallback = normalize((cap.get("headline") or "") + " " + (cap.get("description") or ""))
-
-    for kw in AREA_KEYWORDS:
-        nkw = normalize(kw)
-        if not nkw:
-            continue
-        if nkw in hay_area:
-            return True
-        if (not STRICT_AREA_MATCH) and nkw in fallback:
+    areas_norm = {normalize(a) for a in areas}
+    for allowed in AREA_ALLOWLIST:
+        if normalize(allowed) in areas_norm:
             return True
 
     return False
@@ -360,8 +345,7 @@ def ensure_rss_exists() -> None:
     ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
     ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
     ET.SubElement(channel, "description").text = (
-        "Automated weather statements and alerts for Victoria Harbour, Port McNicoll, "
-        "Waubaushene and Waverley."
+        "Automated weather statements and alerts for Tay Township area."
     )
     ET.SubElement(channel, "language").text = "en-ca"
 
@@ -524,6 +508,8 @@ def mark_posted(state: Dict[str, Any], cap: Dict[str, Any]) -> None:
 def get_oauth2_access_token() -> str:
     """
     Uses refresh token to mint a short-lived access token.
+    Note: X may rotate refresh tokens; if you see a new refresh_token printed,
+    update your GitHub Secret X_REFRESH_TOKEN.
     """
     client_id = os.getenv("X_CLIENT_ID", "").strip()
     client_secret = os.getenv("X_CLIENT_SECRET", "").strip()
@@ -549,13 +535,19 @@ def get_oauth2_access_token() -> str:
     }
 
     r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
-    print("X token refresh:", r.status_code, r.text[:300])
+    print("X token refresh:", r.status_code, r.text[:400])
     r.raise_for_status()
 
     payload = r.json()
     access = payload.get("access_token")
     if not access:
         raise RuntimeError("No access_token returned during refresh.")
+
+    new_refresh = payload.get("refresh_token")
+    if new_refresh and new_refresh != refresh_token:
+        print("⚠️ X_REFRESH_TOKEN rotated. Update GitHub Secret X_REFRESH_TOKEN to:")
+        print(new_refresh)
+
     return access
 
 
@@ -696,7 +688,10 @@ def main() -> None:
                 title = (cap.get("headline") or cap.get("event") or "Weather alert").strip()
                 pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
                 guid = cap_id
-                link = cap_url
+
+                # IMPORTANT: do NOT link to the CAP URL (often becomes unavailable later).
+                link = MORE_INFO_URL
+
                 description = build_rss_description(cap)
 
                 if not rss_item_exists(channel, guid):
