@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+from requests_oauthlib import OAuth1
 
 INCLUDE_SPECIAL_WEATHER_STATEMENTS = True
 INCLUDE_ALERTS = True  # warnings/watches/advisories etc.
@@ -21,6 +22,26 @@ EXCLUDED_EVENTS = {
 # Cooldowns (recommended)
 COOLDOWN_MINUTES_ALERTS = 45
 COOLDOWN_MINUTES_SWS = 120
+
+# X posting
+ENABLE_X_POSTING = True
+MAX_TWEETS_PER_DAY = 15  # Free tier safety (under ~17/day)
+
+X_TEMPLATE_ALERT = (
+    "Tay Township Weather Alert: {event}\n"
+    "Area: {area}\n"
+    "{headline}\n"
+    "More info: {url}\n"
+    "#ONwx"
+)
+
+X_TEMPLATE_SWS = (
+    "Tay Township Weather Update (Info): {event}\n"
+    "Area: {area}\n"
+    "{headline}\n"
+    "More info: {url}\n"
+    "#ONwx"
+)
 
 # ----------------------------
 # Settings (Tay hamlets)
@@ -63,7 +84,7 @@ def load_state() -> dict:
     Load state.json safely.
     If missing/invalid, reset to defaults.
     """
-    default = {"seen_ids": [], "cooldowns": {}}
+    default = {"seen_ids": [], "cooldowns": {}, "posted_guids": [], "daily_counts": {}}
 
     if not os.path.exists(STATE_PATH):
         return default
@@ -73,10 +94,16 @@ def load_state() -> dict:
             data = json.load(f)
             if not isinstance(data, dict):
                 return default
+
             if "seen_ids" not in data or not isinstance(data["seen_ids"], list):
                 data["seen_ids"] = []
             if "cooldowns" not in data or not isinstance(data["cooldowns"], dict):
                 data["cooldowns"] = {}
+            if "posted_guids" not in data or not isinstance(data["posted_guids"], list):
+                data["posted_guids"] = []
+            if "daily_counts" not in data or not isinstance(data["daily_counts"], dict):
+                data["daily_counts"] = {}
+
             return data
     except Exception:
         return default
@@ -85,6 +112,7 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     # Prevent endless growth
     state["seen_ids"] = state.get("seen_ids", [])[-5000:]
+    state["posted_guids"] = state.get("posted_guids", [])[-5000:]
 
     # Keep cooldowns from growing forever: retain only last 7 days
     cooldowns = state.get("cooldowns", {})
@@ -92,7 +120,8 @@ def save_state(state: dict) -> None:
         now = dt.datetime.now(dt.timezone.utc).timestamp()
         seven_days = 7 * 24 * 60 * 60
         state["cooldowns"] = {
-            k: v for k, v in cooldowns.items()
+            k: v
+            for k, v in cooldowns.items()
             if isinstance(v, (int, float)) and (now - float(v)) <= seven_days
         }
     else:
@@ -196,13 +225,13 @@ def should_include_event(cap: dict) -> bool:
     if any(bad in event for bad in EXCLUDED_EVENTS):
         return False
 
-    is_sws = (event == "special weather statement")
+    is_sws_event = (event == "special weather statement")
 
-    if is_sws and INCLUDE_SPECIAL_WEATHER_STATEMENTS:
+    if is_sws_event and INCLUDE_SPECIAL_WEATHER_STATEMENTS:
         return True
 
     # “Alerts” = everything else (warnings/watches/advisories etc.)
-    if (not is_sws) and INCLUDE_ALERTS:
+    if (not is_sws_event) and INCLUDE_ALERTS:
         return True
 
     return False
@@ -226,7 +255,6 @@ def rfc2822_date_from_sent(sent: str) -> str:
     If parsing fails, use current UTC.
     """
     if sent:
-        # Try a couple common ISO formats
         for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
             try:
                 if fmt.endswith("%z"):
@@ -325,7 +353,6 @@ def add_rss_item(
     pub_date: str,
     description: str,
 ) -> None:
-    # Insert item near top (after channel metadata)
     item = ET.Element("item")
     ET.SubElement(item, "title").text = title
     ET.SubElement(item, "link").text = link
@@ -335,7 +362,6 @@ def add_rss_item(
     ET.SubElement(item, "pubDate").text = pub_date
     ET.SubElement(item, "description").text = description
 
-    # Place item after last of common channel fields if present
     insert_index = 0
     for i, child in enumerate(list(channel)):
         if child.tag in {"title", "link", "description", "language", "lastBuildDate"}:
@@ -364,14 +390,85 @@ def build_description(cap: dict) -> str:
     if cap.get("instruction"):
         bits.append("Advice: " + cap["instruction"].strip())
 
-    # Add stable more-info link (optional)
     bits.append(f"More info: {MORE_INFO_URL}")
 
-    # Keep it reasonably short for RSS → social
     text = "\n\n".join(bits).strip()
     if len(text) > 1200:
         text = text[:1200].rstrip() + "…"
     return text
+
+
+# ----------------------------
+# X / Tweet helpers
+# ----------------------------
+def x_trim(text: str, limit: int = 280) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def is_sws(cap: dict) -> bool:
+    return normalize(cap.get("event", "")) == "special weather statement"
+
+
+def format_x_post(cap: dict, url: str) -> str:
+    event = (cap.get("event") or "").strip() or "Weather update"
+    headline = (cap.get("headline") or "").strip()
+    areas = cap.get("areas") or []
+    area = areas[0].strip() if areas else "Tay area"
+
+    tmpl = X_TEMPLATE_SWS if is_sws(cap) else X_TEMPLATE_ALERT
+    text = tmpl.format(event=event, headline=headline, area=area, url=url)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return x_trim(text, 280)
+
+
+def post_to_x(text: str) -> str:
+    api_key = os.environ.get("X_API_KEY", "")
+    api_secret = os.environ.get("X_API_SECRET", "")
+    access_token = os.environ.get("X_ACCESS_TOKEN", "")
+    access_secret = os.environ.get("X_ACCESS_TOKEN_SECRET", "")
+
+    if not all([api_key, api_secret, access_token, access_secret]):
+        raise RuntimeError("Missing X credentials in environment variables.")
+
+    auth = OAuth1(api_key, api_secret, access_token, access_secret)
+
+    r = requests.post(
+        "https://api.x.com/2/tweets",
+        auth=auth,
+        json={"text": text},
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data.get("data", {}).get("id", "")
+
+
+def today_key_utc() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d")
+
+
+def can_tweet_today(state: dict) -> bool:
+    daily = state.get("daily_counts", {})
+    if not isinstance(daily, dict):
+        daily = {}
+        state["daily_counts"] = daily
+
+    k = today_key_utc()
+    count = int(daily.get(k, 0))
+    return count < MAX_TWEETS_PER_DAY
+
+
+def increment_tweet_today(state: dict) -> None:
+    daily = state.get("daily_counts", {})
+    if not isinstance(daily, dict):
+        daily = {}
+        state["daily_counts"] = daily
+
+    k = today_key_utc()
+    daily[k] = int(daily.get(k, 0)) + 1
 
 
 def main():
@@ -382,9 +479,12 @@ def main():
     if not isinstance(cooldowns, dict):
         cooldowns = {}
 
+    posted_guids = set(state.get("posted_guids", []))
+
     tree, channel = load_rss_tree()
 
     new_items = 0
+    new_tweets = 0
 
     for yyyymmdd, hh in utc_dirs_to_check(HOURS_BACK_TO_SCAN):
         for office in OFFICES:
@@ -408,7 +508,7 @@ def main():
                 if not cap_id or cap_id in seen:
                     continue
 
-                # Mark as seen even if it doesn't match, so we don't keep reprocessing it
+                # Mark as seen so we don't keep reprocessing it
                 seen.add(cap_id)
 
                 if not should_include_event(cap):
@@ -417,12 +517,12 @@ def main():
                 if not area_matches(cap):
                     continue
 
-                # Cooldown check (avoid repeated posts for same event+area)
+                # Cooldown check
                 key = cooldown_key(cap)
                 now_ts = parse_sent_to_epoch(cap.get("sent", ""))
                 last_ts = cooldowns.get(key)
-
                 cooldown_mins = cooldown_minutes_for(cap)
+
                 if isinstance(last_ts, (int, float)):
                     minutes_since = (now_ts - float(last_ts)) / 60.0
                     if minutes_since < cooldown_mins:
@@ -432,7 +532,7 @@ def main():
                 title = cap.get("headline") or cap.get("event") or "Weather update"
                 pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
                 guid = cap_id
-                link = cap_url  # link directly to the CAP file (public)
+                link = cap_url  # RSS item link points to CAP file
                 description = build_description(cap)
 
                 if not rss_item_exists(channel, guid):
@@ -447,7 +547,19 @@ def main():
                     new_items += 1
                     cooldowns[key] = now_ts
 
-    # Update lastBuildDate for neatness
+                    # Post to X once per GUID, subject to daily cap
+                    if ENABLE_X_POSTING and guid not in posted_guids and can_tweet_today(state):
+                        try:
+                            x_text = format_x_post(cap, MORE_INFO_URL)
+                            _tweet_id = post_to_x(x_text)
+                            posted_guids.add(guid)
+                            increment_tweet_today(state)
+                            new_tweets += 1
+                        except Exception as e:
+                            # Don't crash the whole run if X fails; RSS still updates
+                            print(f"X post failed: {e}")
+
+    # Update lastBuildDate
     now_rfc = email.utils.format_datetime(dt.datetime.now(dt.timezone.utc))
     lbd = channel.find("lastBuildDate")
     if lbd is None:
@@ -460,10 +572,12 @@ def main():
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
     state["seen_ids"] = list(seen)
     state["cooldowns"] = cooldowns
+    state["posted_guids"] = list(posted_guids)
     save_state(state)
 
-    print(f"Done. Added {new_items} new RSS item(s).")
+    print(f"Done. Added {new_items} new RSS item(s). Posted {new_tweets} tweet(s).")
 
 
 if __name__ == "__main__":
     main()
+    
