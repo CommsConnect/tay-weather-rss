@@ -28,19 +28,21 @@ ENABLE_X_POSTING = False
 MAX_TWEETS_PER_DAY = 15  # Free tier safety (under ~17/day)
 
 X_TEMPLATE_ALERT = (
-    "Tay Township Weather Alert: {event}\n"
+    "⚠️ Weather Canada {event}\n"
     "Area: {area}\n"
     "{headline}\n"
-    "More info: {url}\n"
-    "#ONwx"
+    "Use caution and plan ahead.\n"
+    "Details: {url}\n"
+    "#ONwx #TayTownship"
 )
 
 X_TEMPLATE_SWS = (
-    "Tay Township Weather Update (Info): {event}\n"
+    "Weather Canada Special Weather Statement\n"
     "Area: {area}\n"
     "{headline}\n"
-    "More info: {url}\n"
-    "#ONwx"
+    "Stay aware of changing conditions.\n"
+    "Details: {url}\n"
+    "#ONwx #TayTownship"
 )
 
 # ----------------------------
