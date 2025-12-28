@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from requests_oauthlib import OAuth1
 
+ENABLE_X_POSTING = os.environ.get("ENABLE_X_POSTING", "true").lower() == "true"
+
 INCLUDE_SPECIAL_WEATHER_STATEMENTS = True
 INCLUDE_ALERTS = True  # warnings/watches/advisories etc.
 
