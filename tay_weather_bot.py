@@ -1,11 +1,11 @@
 # tay_weather_bot.py
 #
 # Tay Township Weather Bot
-# - Pulls Environment Canada CAP alerts from Datamart (dd.weather.gc.ca)
-# - Filters to Tay-area regions using a strict allow-list match on CAP <areaDesc>
+# - Pulls Environment Canada CAP alerts from Datamart
+# - Filters to Tay-area regions (strict allow-list match on CAP <areaDesc>)
 # - Writes RSS feed: tay-weather.xml
 # - Posts to X automatically using OAuth 2.0 (refresh token)
-# - Supports cooldowns + dedupe + "all clear" follow-up for Cancel messages
+# - Supports cooldowns + dedupe + optional "all clear" follow-up for Cancel messages
 #
 # REQUIRED GitHub Secrets (repo Settings > Secrets and variables > Actions):
 #   X_CLIENT_ID
@@ -13,8 +13,7 @@
 #   X_REFRESH_TOKEN
 #
 # OPTIONAL Workflow env vars:
-#   TEST_TWEET=true        -> forces a test tweet and exits
-#   ENABLE_X_POSTING=true  -> if not true, skips posting to X (RSS only)
+#   TEST_TWEET=true   -> forces a test tweet and exits
 #
 # Files:
 #   state.json        -> auto-maintained; tracks seen CAP IDs, posted GUIDs, cooldowns
@@ -42,14 +41,11 @@ from bs4 import BeautifulSoup
 INCLUDE_SPECIAL_WEATHER_STATEMENTS = True
 INCLUDE_ALERTS = True  # warnings/watches/advisories etc.
 
-# If True: require CAP <areaDesc> to match allow-list exactly (recommended).
+# If True: require CAP <areaDesc> to match allow-list (recommended).
 STRICT_AREA_MATCH = True
 
-# Post to X. Controlled by env var ENABLE_X_POSTING.
-POST_TO_X = os.getenv("ENABLE_X_POSTING", "true").lower() == "true"
-
-# If True, prints rejected areas to help you tune allowlist (recommended during setup).
-DEBUG_REJECTIONS = os.getenv("DEBUG_REJECTIONS", "false").lower() == "true"
+# Post to X. If you only want RSS, set False.
+POST_TO_X = True
 
 # ----------------------------
 # Exclusions
@@ -63,18 +59,18 @@ EXCLUDED_EVENTS = {
 # ----------------------------
 # Tay / target areas
 # ----------------------------
-# Strict allow-list for CAP <areaDesc>.
-# Only these areaDesc values will pass. Add additional *exact* strings you see in CAP files.
+# Strict allow-list for CAP <areaDesc>. Only these exact areaDesc values will pass.
+# Add additional exact strings you see in CAP <areaDesc> that actually cover Tay.
 AREA_ALLOWLIST = [
-    # Land (Tay region)
+    # Land (Tay forecast region)
     "Midland - Coldwater - Orr Lake",
 
-    # Marine (add more only after you see them in CAP areaDesc)
+    # Marine (optional)
     "Southern Georgian Bay",
 ]
 
-# CAP Datamart offices (CWTO covers Ontario; keep it tight)
-OFFICES = ["CWTO"]
+# CAP Datamart offices
+OFFICES = ["CWTO"]  # Ontario Storm Prediction Centre
 
 # Look-back window (hours)
 HOURS_BACK_TO_SCAN = 12
@@ -88,7 +84,7 @@ RSS_PATH = "tay-weather.xml"
 
 USER_AGENT = "tay-weather-rss-bot/1.0"
 
-# More info URL (stable; avoids CAP link 404s)
+# Use your preferred “more info” URL (avoid linking CAP files, which can 404 later)
 MORE_INFO_URL = "https://weather.gc.ca/?zoom=11&center=44.80743105,-79.69598152"
 
 # ----------------------------
@@ -146,6 +142,9 @@ def normalize(s: str) -> str:
     s = s.replace("–", "-").replace("—", "-")
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+
+ALLOWLIST_NORM = {normalize(a) for a in AREA_ALLOWLIST}
 
 
 def now_utc() -> dt.datetime:
@@ -258,7 +257,7 @@ def parse_cap(xml_text: str) -> Dict[str, Any]:
     description = find_text(info, "description")
     instruction = find_text(info, "instruction")
 
-    msg_type = find_text(info, "msgType")  # Alert | Update | Cancel (typical)
+    msg_type = find_text(info, "msgType")  # Alert | Update | Cancel
     severity = find_text(info, "severity")
     urgency = find_text(info, "urgency")
     certainty = find_text(info, "certainty")
@@ -305,23 +304,23 @@ def should_include_event(cap: Dict[str, Any]) -> bool:
     return False
 
 
+def matched_areas(cap: Dict[str, Any]) -> List[str]:
+    """
+    Returns only the CAP areaDesc strings that are in our allow-list.
+    This prevents unrelated regions from appearing in tweets/RSS (Uxbridge, Lambton, etc.).
+    """
+    areas = cap.get("areas", []) or []
+    return [a for a in areas if normalize(a) in ALLOWLIST_NORM]
+
+
 def area_matches(cap: Dict[str, Any]) -> bool:
     """
-    True only if at least one CAP <areaDesc> matches an allowlisted EC region (case-insensitive).
-    This prevents unrelated Ontario regions (Uxbridge, Lambton, etc.) from posting.
+    True only if at least one CAP <areaDesc> matches an allow-listed EC region.
     """
     areas = cap.get("areas", []) or []
     if STRICT_AREA_MATCH and not areas:
         return False
-
-    areas_norm = [normalize(a) for a in areas]
-    allow_norm = {normalize(a) for a in AREA_ALLOWLIST}
-
-    for a in areas_norm:
-        if a in allow_norm:
-            return True
-
-    return False
+    return len(matched_areas(cap)) > 0
 
 
 def rfc2822_date_from_sent(sent: str) -> str:
@@ -401,9 +400,9 @@ def trim_rss_items(channel: ET.Element, max_items: int) -> None:
 
 def build_rss_description(cap: Dict[str, Any]) -> str:
     bits = []
-    areas = cap.get("areas", []) or []
+    areas = matched_areas(cap)
     if areas:
-        bits.append(f"Area: {areas[0]}")
+        bits.append("Area: " + ", ".join(areas))
 
     if cap.get("event"):
         bits.append(f"Event: {cap['event'].strip()}")
@@ -417,7 +416,6 @@ def build_rss_description(cap: Dict[str, Any]) -> str:
     if cap.get("instruction"):
         bits.append("Advice: " + cap["instruction"].strip())
 
-    # stable link
     bits.append(f"More info: {MORE_INFO_URL}")
 
     text = "\n\n".join(bits).strip()
@@ -430,22 +428,17 @@ def build_rss_description(cap: Dict[str, Any]) -> str:
 # Cooldown logic
 # ----------------------------
 def classify_event_kind(cap: Dict[str, Any]) -> str:
-    """
-    statement | warning | watch | advisory | alert
-    """
     event = normalize(cap.get("event", ""))
     headline = normalize(cap.get("headline", ""))
 
     if event == "special weather statement" or "special weather statement" in headline:
         return "statement"
-
     if "warning" in headline or "warning" in event:
         return "warning"
     if "watch" in headline or "watch" in event:
         return "watch"
     if "advisory" in headline or "advisory" in event:
         return "advisory"
-
     return "alert"
 
 
@@ -464,7 +457,7 @@ def is_all_clear(cap: Dict[str, Any]) -> bool:
 
 
 def group_key_for_cooldown(cap: Dict[str, Any]) -> str:
-    areas = cap.get("areas", []) or []
+    areas = matched_areas(cap)
     area_primary = areas[0] if areas else ""
     kind = "allclear" if is_all_clear(cap) else classify_event_kind(cap)
     raw = f"{normalize(area_primary)}|{kind}"
@@ -507,11 +500,14 @@ def mark_posted(state: Dict[str, Any], cap: Dict[str, Any]) -> None:
 # ----------------------------
 # X (OAuth 2.0) helpers
 # ----------------------------
+TOKEN_URL = "https://api.x.com/2/oauth2/token"
+
+
 def get_oauth2_access_token() -> str:
     """
     Uses refresh token to mint a short-lived access token.
-    Note: refresh token may rotate. If a new refresh token is returned, it will be printed.
-    Update your GitHub Secret X_REFRESH_TOKEN manually when you see rotation.
+    X may rotate refresh tokens; if a new refresh_token is returned, we print it
+    so you can update GitHub Secret X_REFRESH_TOKEN.
     """
     client_id = os.getenv("X_CLIENT_ID", "").strip()
     client_secret = os.getenv("X_CLIENT_SECRET", "").strip()
@@ -536,7 +532,7 @@ def get_oauth2_access_token() -> str:
         "refresh_token": refresh_token,
     }
 
-    r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
+    r = requests.post(TOKEN_URL, headers=headers, data=data, timeout=30)
     print("X token refresh:", r.status_code, r.text[:400])
     r.raise_for_status()
 
@@ -576,13 +572,11 @@ def post_to_x(text: str) -> Dict[str, Any]:
 
 
 def build_areas_short(cap: Dict[str, Any]) -> str:
-    areas = cap.get("areas", []) or []
+    areas = matched_areas(cap)
     if not areas:
         return "Tay Township area"
-    s = areas[0].strip()
-    if len(s) > 70:
-        s = s[:67].rstrip() + "…"
-    return s
+    s = ", ".join(areas)
+    return s if len(s) <= 70 else (s[:67].rstrip() + "…")
 
 
 def extract_advice_short(cap: Dict[str, Any]) -> str:
@@ -636,7 +630,7 @@ def build_tweet_text(cap: Dict[str, Any]) -> str:
 def main() -> None:
     if TEST_TWEET:
         if not POST_TO_X:
-            raise RuntimeError("TEST_TWEET requested but ENABLE_X_POSTING is not true.")
+            raise RuntimeError("TEST_TWEET requested but POST_TO_X is False.")
         print("TEST_TWEET is true. Posting a test tweet and exiting.")
         post_to_x("Test tweet from Tay weather bot ✅")
         print("Test tweet sent.")
@@ -659,7 +653,7 @@ def main() -> None:
             try:
                 cap_urls = list_cap_files(directory_url)
             except Exception as e:
-                # Directories may legitimately 404 for some hours; treat as non-fatal
+                # 404 directories are normal sometimes; just move on
                 print("Directory fetch failed:", directory_url, str(e))
                 continue
 
@@ -682,34 +676,21 @@ def main() -> None:
 
                 if not should_include_event(cap):
                     continue
-
                 if not area_matches(cap):
-                    if DEBUG_REJECTIONS:
-                        print("Rejected CAP areas:", cap.get("areas", []), "| headline:", (cap.get("headline") or "")[:120])
                     continue
 
-                # RSS item
+                # Use stable link instead of CAP URL
+                link = MORE_INFO_URL
+
                 title = (cap.get("headline") or cap.get("event") or "Weather alert").strip()
                 pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
                 guid = cap_id
-
-                # IMPORTANT: stable URL (avoids CAP link 404s)
-                link = MORE_INFO_URL
-
                 description = build_rss_description(cap)
 
                 if not rss_item_exists(channel, guid):
-                    add_rss_item(
-                        channel,
-                        title=title,
-                        link=link,
-                        guid=guid,
-                        pub_date=pub_date,
-                        description=description,
-                    )
+                    add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
                     new_rss_items += 1
 
-                # Post to X
                 if POST_TO_X:
                     if guid in posted:
                         continue
@@ -722,14 +703,13 @@ def main() -> None:
 
                     tweet_text = build_tweet_text(cap)
                     print("Tweet preview:", tweet_text.replace("\n", " | ")[:240])
-                    print("Matched areas:", cap.get("areas", []))
+                    print("Matched areas:", matched_areas(cap))
 
                     post_to_x(tweet_text)
                     tweets_posted += 1
                     posted.add(guid)
                     mark_posted(state, cap)
 
-    # Update lastBuildDate
     lbd = channel.find("lastBuildDate")
     if lbd is None:
         lbd = ET.SubElement(channel, "lastBuildDate")
@@ -737,7 +717,6 @@ def main() -> None:
 
     trim_rss_items(channel, MAX_RSS_ITEMS)
 
-    # Save RSS + state
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
     state["seen_ids"] = list(seen)
     state["posted_guids"] = list(posted)
