@@ -30,12 +30,13 @@ jobs:
 
       - name: Run weather bot
         env:
+          ENABLE_X_POSTING: "true"
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
         run: |
-          python tay_weather_bot.py
+         python tay_weather_bot.py
 
       - name: Commit and push if changed
         run: |
