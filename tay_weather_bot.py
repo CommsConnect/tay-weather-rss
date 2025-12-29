@@ -2,28 +2,23 @@
 #
 # Tay Township Weather Bot
 # - Pulls Environment Canada CAP alerts from Datamart
-# - Filters to Tay allow-list regions (strict match on CAP <areaDesc>)
+# - Filters to Tay-area regions (strict allow-list match on CAP <areaDesc>)
 # - Writes RSS feed: tay-weather.xml
-# - Posts to X using OAuth 2.0 (refresh token) + auto-updates rotated refresh token into GitHub Secrets
-# - Posts to Facebook Page (Graph API) if enabled
+# - Posts to X automatically using OAuth 2.0 (refresh token)
+# - Posts to Facebook Page automatically (Page access token)
 # - Supports cooldowns + dedupe + "all clear" follow-up for Cancel messages
 #
 # REQUIRED GitHub Secrets:
 #   X_CLIENT_ID
 #   X_CLIENT_SECRET
 #   X_REFRESH_TOKEN
-#
-# For auto-updating X_REFRESH_TOKEN when it rotates:
-#   GH_PAT_ACTIONS_SECRETS   (GitHub PAT with permission to edit repo secrets)
-#
-# For Facebook Page posting:
 #   FB_PAGE_ID
 #   FB_PAGE_ACCESS_TOKEN
 #
 # OPTIONAL workflow env vars:
-#   ENABLE_X_POSTING=true/false
-#   ENABLE_FB_POSTING=true/false
-#   TEST_TWEET=true          (forces a test post to X and exits)
+#   ENABLE_X_POSTING=true|false
+#   ENABLE_FB_POSTING=true|false
+#   TEST_TWEET=true
 #
 import base64
 import json
@@ -42,17 +37,15 @@ from bs4 import BeautifulSoup
 
 
 # ----------------------------
-# Feature toggles (controlled by env in Actions)
+# Feature toggles
 # ----------------------------
+INCLUDE_SPECIAL_WEATHER_STATEMENTS = True
+INCLUDE_ALERTS = True
+STRICT_AREA_MATCH = True
+
 ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
 ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
 TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
-
-INCLUDE_SPECIAL_WEATHER_STATEMENTS = True
-INCLUDE_ALERTS = True  # warnings/watches/advisories etc.
-
-# Require CAP <areaDesc> to match allow-list (recommended).
-STRICT_AREA_MATCH = True
 
 
 # ----------------------------
@@ -66,20 +59,18 @@ EXCLUDED_EVENTS = {
 
 
 # ----------------------------
-# Tay / target areas
+# Tay / target areas (exact CAP <areaDesc> strings)
 # ----------------------------
-# Strict allow-list for CAP <areaDesc>. Only these areaDesc values will pass.
-# Add additional *exact* strings you see inside CAP <areaDesc> when you encounter them.
 AREA_ALLOWLIST = [
     # Land (Tay region)
     "Midland - Coldwater - Orr Lake",
 
-    # Marine (if you want marine alerts)
+    # Marine (optional)
     "Southern Georgian Bay",
 ]
 
-# CAP Datamart offices (CWTO covers Ontario)
-OFFICES = ["CWTO"]
+# CAP Datamart offices
+OFFICES = ["CWTO"]  # Ontario Storm Prediction Centre
 
 # Look-back window (hours)
 HOURS_BACK_TO_SCAN = 12
@@ -93,8 +84,11 @@ RSS_PATH = "tay-weather.xml"
 
 USER_AGENT = "tay-weather-rss-bot/1.0"
 
-# Public “more info” link used in tweet + RSS item link
+# Stable public “more info” URL (avoid CAP link 404s)
 MORE_INFO_URL = "https://weather.gc.ca/?zoom=11&center=44.80743105,-79.69598152"
+
+# When X rotates refresh tokens, we write the newest value here
+ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
 
 
 # ----------------------------
@@ -113,7 +107,7 @@ GLOBAL_COOLDOWN_MINUTES = 5
 
 
 # ----------------------------
-# Post templates
+# Social templates
 # ----------------------------
 TWEET_TEMPLATES = {
     "alert": (
@@ -132,29 +126,9 @@ TWEET_TEMPLATES = {
     ),
     "allclear": (
         "✅ All clear: {event_label} ended for {areas_short}\n"
-        "Use caution as conditions may still be hazardous.\n"
+        "Continue to use caution as conditions may still be hazardous.\n"
         "Details: {more_info}\n"
         "#TayTownship"
-    ),
-}
-
-FB_TEMPLATES = {
-    "alert": (
-        "⚠️ {event_label} for {areas_short}\n\n"
-        "{headline}\n\n"
-        "{advice}\n\n"
-        "More info: {more_info}"
-    ),
-    "statement": (
-        "🌦️ Special Weather Statement for {areas_short}\n\n"
-        "{headline}\n\n"
-        "{advice}\n\n"
-        "More info: {more_info}"
-    ),
-    "allclear": (
-        "✅ All clear: {event_label} ended for {areas_short}\n\n"
-        "Use caution as conditions may still be hazardous.\n\n"
-        "Details: {more_info}"
     ),
 }
 
@@ -183,24 +157,7 @@ def safe_int(x: Any, default: int) -> int:
 
 
 def load_state() -> dict:
-    """
-    state.json structure:
-    {
-      "seen_ids": [],
-      "posted_x_guids": [],
-      "posted_fb_guids": [],
-      "cooldowns": { "group_key": 1735390000 },
-      "global_last_post_ts": 0
-    }
-    """
-    default = {
-        "seen_ids": [],
-        "posted_x_guids": [],
-        "posted_fb_guids": [],
-        "cooldowns": {},
-        "global_last_post_ts": 0,
-    }
-
+    default = {"seen_ids": [], "posted_guids": [], "cooldowns": {}, "global_last_post_ts": 0}
     if not os.path.exists(STATE_PATH):
         return default
 
@@ -215,8 +172,7 @@ def load_state() -> dict:
         return default
 
     data.setdefault("seen_ids", [])
-    data.setdefault("posted_x_guids", [])
-    data.setdefault("posted_fb_guids", [])
+    data.setdefault("posted_guids", [])
     data.setdefault("cooldowns", {})
     data.setdefault("global_last_post_ts", 0)
     return data
@@ -224,8 +180,7 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     state["seen_ids"] = state.get("seen_ids", [])[-5000:]
-    state["posted_x_guids"] = state.get("posted_x_guids", [])[-5000:]
-    state["posted_fb_guids"] = state.get("posted_fb_guids", [])[-5000:]
+    state["posted_guids"] = state.get("posted_guids", [])[-5000:]
 
     cds = state.get("cooldowns", {})
     if isinstance(cds, dict) and len(cds) > 5000:
@@ -275,6 +230,7 @@ def pick_info_block(root: ET.Element) -> Optional[ET.Element]:
 
 def parse_cap(xml_text: str) -> Dict[str, Any]:
     root = ET.fromstring(xml_text)
+
     identifier = find_text(root, "identifier")
     sent = find_text(root, "sent")
 
@@ -284,7 +240,7 @@ def parse_cap(xml_text: str) -> Dict[str, Any]:
     description = find_text(info, "description")
     instruction = find_text(info, "instruction")
 
-    msg_type = find_text(info, "msgType")  # Alert | Update | Cancel
+    msg_type = find_text(info, "msgType")
     severity = find_text(info, "severity")
     urgency = find_text(info, "urgency")
     certainty = find_text(info, "certainty")
@@ -317,37 +273,35 @@ def should_include_event(cap: Dict[str, Any]) -> bool:
 
     if not event and not headline:
         return False
-
     if any(bad in event for bad in EXCLUDED_EVENTS) or any(bad in headline for bad in EXCLUDED_EVENTS):
         return False
 
     is_sws = (event == "special weather statement")
     if is_sws and INCLUDE_SPECIAL_WEATHER_STATEMENTS:
         return True
-
     if (not is_sws) and INCLUDE_ALERTS:
         return True
-
     return False
+
+
+def primary_allowlisted_area(cap: Dict[str, Any]) -> str:
+    """
+    Pick the first CAP areaDesc that matches our allowlist.
+    This prevents “Uxbridge …” showing up when Midland is also included.
+    """
+    areas = cap.get("areas", []) or []
+    allow_norm = [normalize(a) for a in AREA_ALLOWLIST]
+    for a in areas:
+        if normalize(a) in allow_norm:
+            return a.strip()
+    return ""
 
 
 def area_matches(cap: Dict[str, Any]) -> bool:
-    """
-    True only if at least one CAP <areaDesc> matches allowlist.
-    This is what prevents Uxbridge/Lambton from ever posting.
-    """
     areas = cap.get("areas", []) or []
     if STRICT_AREA_MATCH and not areas:
         return False
-
-    areas_norm = [normalize(a) for a in areas]
-    allow_norm = [normalize(a) for a in AREA_ALLOWLIST]
-
-    for a in areas_norm:
-        if a in allow_norm:
-            return True
-
-    return False
+    return bool(primary_allowlisted_area(cap))
 
 
 def rfc2822_date_from_sent(sent: str) -> str:
@@ -374,9 +328,9 @@ def ensure_rss_exists() -> None:
     rss = ET.Element("rss", version="2.0")
     channel = ET.SubElement(rss, "channel")
 
-    ET.SubElement(channel, "title").text = "Tay Township Weather Alerts"
-    ET.SubElement(channel, "link").text = MORE_INFO_URL
-    ET.SubElement(channel, "description").text = "Automated Environment Canada alerts for Tay Township area."
+    ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
+    ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
+    ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
     ET.SubElement(channel, "language").text = "en-ca"
 
     ET.ElementTree(rss).write(RSS_PATH, encoding="utf-8", xml_declaration=True)
@@ -427,15 +381,19 @@ def trim_rss_items(channel: ET.Element, max_items: int) -> None:
 
 def build_rss_description(cap: Dict[str, Any]) -> str:
     bits = []
-    areas = cap.get("areas", []) or []
-    if areas:
-        bits.append(f"Area: {areas[0]}")
+    area = primary_allowlisted_area(cap) or ((cap.get("areas") or [""])[0]).strip()
+    if area:
+        bits.append(f"Area: {area}")
+
     if cap.get("event"):
         bits.append(f"Event: {cap['event'].strip()}")
+
     if cap.get("headline"):
         bits.append(cap["headline"].strip())
+
     if cap.get("description"):
         bits.append(cap["description"].strip())
+
     if cap.get("instruction"):
         bits.append("Advice: " + cap["instruction"].strip())
 
@@ -456,14 +414,12 @@ def classify_event_kind(cap: Dict[str, Any]) -> str:
 
     if event == "special weather statement" or "special weather statement" in headline:
         return "statement"
-
     if "warning" in headline or "warning" in event:
         return "warning"
     if "watch" in headline or "watch" in event:
         return "watch"
     if "advisory" in headline or "advisory" in event:
         return "advisory"
-
     return "alert"
 
 
@@ -482,8 +438,7 @@ def is_all_clear(cap: Dict[str, Any]) -> bool:
 
 
 def group_key_for_cooldown(cap: Dict[str, Any]) -> str:
-    areas = cap.get("areas", []) or []
-    area_primary = areas[0] if areas else ""
+    area_primary = primary_allowlisted_area(cap) or ""
     kind = "allclear" if is_all_clear(cap) else classify_event_kind(cap)
     raw = f"{normalize(area_primary)}|{kind}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
@@ -523,63 +478,21 @@ def mark_posted(state: Dict[str, Any], cap: Dict[str, Any]) -> None:
 
 
 # ----------------------------
-# GitHub Secrets update (for rotated X refresh token)
-# ----------------------------
-def update_github_secret(secret_name: str, secret_value: str) -> None:
-    """
-    Updates repo Actions secret via GitHub REST API.
-    Requires GH_PAT_ACTIONS_SECRETS and GITHUB_REPOSITORY env vars.
-    Uses PyNaCl (libsodium sealed box) encryption.
-    """
-    token = os.getenv("GH_PAT_ACTIONS_SECRETS", "").strip()
-    repo = os.getenv("GITHUB_REPOSITORY", "").strip()  # e.g. weatherpresenter/tay-weather-rss
-    if not token or not repo:
-        print("GH_PAT_ACTIONS_SECRETS or GITHUB_REPOSITORY missing; skipping auto secret update.")
-        return
-
-    try:
-        from nacl import encoding, public  # type: ignore
-    except Exception:
-        raise RuntimeError("PyNaCl not installed. Add 'pip install pynacl' in workflow.")
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": USER_AGENT,
-    }
-
-    # 1) Get repo public key
-    pk_url = f"https://api.github.com/repos/{repo}/actions/secrets/public-key"
-    r = requests.get(pk_url, headers=headers, timeout=30)
-    r.raise_for_status()
-    pk = r.json()
-    key_id = pk["key_id"]
-    key = pk["key"]
-
-    # 2) Encrypt secret using sealed box
-    public_key = public.PublicKey(key.encode("utf-8"), encoding.Base64Encoder())
-    sealed_box = public.SealedBox(public_key)
-    encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
-    encrypted_value = base64.b64encode(encrypted).decode("utf-8")
-
-    # 3) Put secret
-    put_url = f"https://api.github.com/repos/{repo}/actions/secrets/{secret_name}"
-    payload = {"encrypted_value": encrypted_value, "key_id": key_id}
-    r2 = requests.put(put_url, headers=headers, json=payload, timeout=30)
-    if r2.status_code not in (201, 204):
-        raise RuntimeError(f"GitHub secret update failed: {r2.status_code} {r2.text}")
-
-    print(f"✅ Updated GitHub secret: {secret_name}")
-
-
-# ----------------------------
 # X (OAuth 2.0) helpers
 # ----------------------------
+def write_rotated_refresh_token(new_refresh: str) -> None:
+    new_refresh = (new_refresh or "").strip()
+    if not new_refresh:
+        return
+    with open(ROTATED_X_REFRESH_TOKEN_PATH, "w", encoding="utf-8") as f:
+        f.write(new_refresh)
+
+
 def get_oauth2_access_token() -> str:
     """
     Uses refresh token to mint a short-lived access token.
-    If X rotates refresh tokens, we auto-update the GitHub secret.
+    If X returns a new refresh token, write it to ROTATED_X_REFRESH_TOKEN_PATH
+    so the workflow can update GitHub Secrets automatically.
     """
     client_id = os.getenv("X_CLIENT_ID", "").strip()
     client_secret = os.getenv("X_CLIENT_SECRET", "").strip()
@@ -599,7 +512,10 @@ def get_oauth2_access_token() -> str:
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": USER_AGENT,
     }
-    data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
 
     r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
     print("X token refresh:", r.status_code, r.text[:400])
@@ -612,8 +528,8 @@ def get_oauth2_access_token() -> str:
 
     new_refresh = payload.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
-        print("🔁 X refresh token rotated — updating GitHub secret X_REFRESH_TOKEN.")
-        update_github_secret("X_REFRESH_TOKEN", new_refresh)
+        print("⚠️ X refresh token rotated. Workflow will update the repo secret.")
+        write_rotated_refresh_token(new_refresh)
 
     return access
 
@@ -638,13 +554,17 @@ def post_to_x(text: str) -> Dict[str, Any]:
 
 
 # ----------------------------
-# Facebook Page posting
+# Facebook Page posting helpers
 # ----------------------------
-def post_to_facebook(message: str) -> Dict[str, Any]:
+def post_to_facebook_page(message: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
     page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
-    if not page_id or not page_token:
-        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN.")
+    missing = [k for k, v in [
+        ("FB_PAGE_ID", page_id),
+        ("FB_PAGE_ACCESS_TOKEN", page_token),
+    ] if not v]
+    if missing:
+        raise RuntimeError(f"Missing required FB env vars: {', '.join(missing)}")
 
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
     r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
@@ -654,21 +574,20 @@ def post_to_facebook(message: str) -> Dict[str, Any]:
     return r.json()
 
 
-# ----------------------------
-# Text building
-# ----------------------------
 def build_areas_short(cap: Dict[str, Any]) -> str:
-    areas = cap.get("areas", []) or []
-    if not areas:
+    area = primary_allowlisted_area(cap)
+    if not area:
         return "Tay Township area"
-    s = areas[0].strip()
-    return s if len(s) <= 70 else (s[:67].rstrip() + "…")
+    s = area.strip()
+    if len(s) > 70:
+        s = s[:67].rstrip() + "…"
+    return s
 
 
 def extract_advice_short(cap: Dict[str, Any]) -> str:
     inst = (cap.get("instruction") or "").strip()
     if inst:
-        return inst if len(inst) <= 180 else (inst[:177].rstrip() + "…")
+        return inst if len(inst) <= 120 else (inst[:117].rstrip() + "…")
 
     desc = (cap.get("description") or "").strip()
     if not desc:
@@ -676,68 +595,73 @@ def extract_advice_short(cap: Dict[str, Any]) -> str:
 
     parts = re.split(r"(?<=[.!?])\s+", desc)
     first = (parts[0] if parts else desc).strip()
-    return first if len(first) <= 180 else (first[:177].rstrip() + "…")
+    if len(first) > 120:
+        first = first[:117].rstrip() + "…"
+    return first
 
 
-def build_post_texts(cap: Dict[str, Any]) -> Tuple[str, str]:
+def build_social_text(cap: Dict[str, Any]) -> str:
     areas_short = build_areas_short(cap)
     headline = (cap.get("headline") or "").strip() or (cap.get("event") or "Weather alert").strip()
     advice = extract_advice_short(cap)
     event_label = (cap.get("event") or "Weather alert").strip()
 
     if is_all_clear(cap):
-        tweet = TWEET_TEMPLATES["allclear"].format(
-            event_label=event_label, areas_short=areas_short, more_info=MORE_INFO_URL
-        )
-        fb = FB_TEMPLATES["allclear"].format(
-            event_label=event_label, areas_short=areas_short, more_info=MORE_INFO_URL
-        )
+        template = TWEET_TEMPLATES["allclear"]
+        text = template.format(event_label=event_label, areas_short=areas_short, more_info=MORE_INFO_URL)
     else:
         kind = classify_event_kind(cap)
-        tkey = "statement" if kind == "statement" else "alert"
-        tweet = TWEET_TEMPLATES[tkey].format(
-            event_label=event_label, areas_short=areas_short, headline=headline, advice=advice, more_info=MORE_INFO_URL
-        )
-        fb = FB_TEMPLATES[tkey].format(
-            event_label=event_label, areas_short=areas_short, headline=headline, advice=advice, more_info=MORE_INFO_URL
+        template = TWEET_TEMPLATES["statement"] if kind == "statement" else TWEET_TEMPLATES["alert"]
+        text = template.format(
+            event_label=event_label,
+            areas_short=areas_short,
+            headline=headline,
+            advice=advice,
+            more_info=MORE_INFO_URL,
         )
 
-    if len(tweet) > 280:
-        tweet = tweet[:277].rstrip() + "…"
-    return tweet, fb
+    if len(text) > 280:
+        text = text[:277].rstrip() + "…"
+    return text
 
 
 # ----------------------------
 # Main
 # ----------------------------
 def main() -> None:
+    # Clean up any previous rotated token file
+    if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
+        try:
+            os.remove(ROTATED_X_REFRESH_TOKEN_PATH)
+        except Exception:
+            pass
+
     if TEST_TWEET:
-        if not ENABLE_X_POSTING:
-            raise RuntimeError("TEST_TWEET requested but ENABLE_X_POSTING is false.")
-        print("TEST_TWEET=true. Posting a test tweet and exiting.")
-        post_to_x("Test tweet from Tay weather bot ✅")
-        print("Test tweet sent.")
+        text = "Test post from Tay weather bot ✅"
+        print("TEST_TWEET enabled.")
+        if ENABLE_X_POSTING:
+            post_to_x(text)
+        if ENABLE_FB_POSTING:
+            post_to_facebook_page(text)
         return
 
     state = load_state()
     seen = set(state.get("seen_ids", []))
-    posted_x = set(state.get("posted_x_guids", []))
-    posted_fb = set(state.get("posted_fb_guids", []))
+    posted = set(state.get("posted_guids", []))
 
     tree, channel = load_rss_tree()
 
     new_rss_items = 0
-    x_posted = 0
-    fb_posted = 0
-    skipped_cooldown = 0
+    social_posted = 0
+    social_skipped_cooldown = 0
 
     for yyyymmdd, hh in utc_dirs_to_check(HOURS_BACK_TO_SCAN):
         for office in OFFICES:
             directory_url = f"https://dd.weather.gc.ca/today/alerts/cap/{yyyymmdd}/{office}/{hh}/"
-
             try:
                 cap_urls = list_cap_files(directory_url)
             except Exception as e:
+                # Directory 404s are normal (not every hour exists)
                 print("Directory fetch failed:", directory_url, str(e))
                 continue
 
@@ -761,14 +685,13 @@ def main() -> None:
                 if not should_include_event(cap):
                     continue
                 if not area_matches(cap):
-                    # This is your “Uxbridge prevention” — it dies right here.
                     continue
 
                 title = (cap.get("headline") or cap.get("event") or "Weather alert").strip()
                 pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
                 guid = cap_id
 
-                # RSS item link always goes to your stable EC map URL (no CAP 404s)
+                # IMPORTANT: stable link (avoid CAP link 404)
                 link = MORE_INFO_URL
                 description = build_rss_description(cap)
 
@@ -776,31 +699,30 @@ def main() -> None:
                     add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
                     new_rss_items += 1
 
-                allowed, reason = cooldown_allows_post(state, cap)
-                if not allowed:
-                    skipped_cooldown += 1
-                    print("Post skipped:", reason)
+                # Social posting (dedupe + cooldown)
+                if guid in posted:
                     continue
 
-                tweet_text, fb_text = build_post_texts(cap)
+                allowed, reason = cooldown_allows_post(state, cap)
+                if not allowed:
+                    social_skipped_cooldown += 1
+                    print("Social skipped:", reason)
+                    continue
 
-                # X
-                if ENABLE_X_POSTING and guid not in posted_x:
-                    print("X preview:", tweet_text.replace("\n", " | ")[:240])
-                    post_to_x(tweet_text)
-                    posted_x.add(guid)
-                    x_posted += 1
-                    mark_posted(state, cap)
+                social_text = build_social_text(cap)
+                print("Social preview:", social_text.replace("\n", " | "))
+                print("Matched allowlisted area:", primary_allowlisted_area(cap))
 
-                # FB
-                if ENABLE_FB_POSTING and guid not in posted_fb:
-                    print("FB preview:", fb_text.replace("\n", " | ")[:240])
-                    post_to_facebook(fb_text)
-                    posted_fb.add(guid)
-                    fb_posted += 1
-                    mark_posted(state, cap)
+                if ENABLE_X_POSTING:
+                    post_to_x(social_text)
+                if ENABLE_FB_POSTING:
+                    post_to_facebook_page(social_text)
 
-    # lastBuildDate
+                social_posted += 1
+                posted.add(guid)
+                mark_posted(state, cap)
+
+    # Update lastBuildDate
     lbd = channel.find("lastBuildDate")
     if lbd is None:
         lbd = ET.SubElement(channel, "lastBuildDate")
@@ -810,16 +732,14 @@ def main() -> None:
 
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
     state["seen_ids"] = list(seen)
-    state["posted_x_guids"] = list(posted_x)
-    state["posted_fb_guids"] = list(posted_fb)
+    state["posted_guids"] = list(posted)
     save_state(state)
 
     print(
         "Run summary:",
         f"new_rss_items_added={new_rss_items}",
-        f"x_posted={x_posted}",
-        f"fb_posted={fb_posted}",
-        f"skipped_cooldown={skipped_cooldown}",
+        f"social_posted={social_posted}",
+        f"social_skipped_cooldown={social_skipped_cooldown}",
     )
 
 
