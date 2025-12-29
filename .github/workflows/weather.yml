@@ -28,22 +28,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 pynacl
 
-      - name: Run weather bot (RSS + social)
+      - name: Run weather bot
         env:
-          # Toggles
           ENABLE_X_POSTING: "true"
           ENABLE_FB_POSTING: "true"
-
-          # X OAuth2 (refresh token flow)
           X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
           X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
           X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
-
-          # GitHub PAT for updating repo secrets (used when refresh token rotates)
           GH_PAT_ACTIONS_SECRETS: ${{ secrets.GH_PAT_ACTIONS_SECRETS }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-
-          # Facebook Page posting
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
         run: |
