@@ -1,412 +1,73 @@
-<?xml version='1.0' encoding='utf-8'?>
-<rss version="2.0">
-  <channel>
-    <title>Tay Township Weather Statements</title>
-    <link>https://weatherpresenter.github.io/tay-weather-rss/</link>
-    <description>
-      Automated Special Weather Statements for Victoria Harbour, Port McNicoll,
-      Waubaushene and Waverley.
-    </description>
-    <language>en-ca</language>
-  <lastBuildDate>Sun, 28 Dec 2025 22:59:15 +0000</lastBuildDate><item><title>yellow warning - wind - in effect</title><link>https://weather.gc.ca/?zoom=11&amp;center=44.80743105,-79.69598152</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.4242113481.2025</guid><pubDate>Sun, 28 Dec 2025 21:34:57 +0000</pubDate><description>Area: Midland - Coldwater - Orr Lake
-
-Event: wind
-
-yellow warning - wind - in effect
-
-Strong winds expected on Monday. 
-
-What: 
-Strong wind gusts of 70 to 90 km/h. 
-
-When: 
-Beginning Monday morning and easing Monday evening. 
-
-Additional information. 
-Strong southwesterly winds are expected to develop Monday morning 
-with the passage of a strong cold front. The winds will become northwesterly through the afternoon. The winds will ease through Monday evening. Areas with significant ice build-up from freezing rain will be most vulnerable.
-
-###
-
-Utility outages are possible. Significant disruptions to services and travel are likely. Significant damage to buildings and/or trees is possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Secure loose objects. Stay away from fallen power lines. Prepare for some disruptions to transportation, services, and utilities.
-
-More info: https://weather.gc.ca/?zoom=11&amp;center=44.80743105,-79.69598152</description></item><item><title>yellow warning - rainfall - in effect</title><link>https://weather.gc.ca/?zoom=11&amp;center=44.80743105,-79.69598152</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.2552773092.2025</guid><pubDate>Sun, 28 Dec 2025 20:29:32 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: rainfall
-
-yellow warning - rainfall - in effect
-
-Rainfall, combined with melting snow, is expected. The frozen ground has a reduced ability to absorb this rainfall.
-
-What:
-Total rain and freezing rain amounts of 15 to 30 mm.
-
-When:
-Continuing this afternoon and ending early Monday morning. 
-
-Additional information:
-Freezing rain will continue this afternoon and transition to rain this evening. Rain and freezing rain will be heavy at times through the afternoon and evening. The rain will ease early Monday morning.
-
-If possible, clear storm drains of snow and ice.
-
-###
-
-Water will likely pool on roads and in low-lying areas.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Avoid low-lying areas. Watch for washouts near rivers, creeks and culverts.
-
-More info: https://weather.gc.ca/?zoom=11&amp;center=44.80743105,-79.69598152</description></item><item><title>yellow warning - rainfall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/19/T_WZCN80_C_CWTO_202512281921_3180505965.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.3180505965.2025</guid><pubDate>Sun, 28 Dec 2025 19:21:42 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: rainfall
-
-yellow warning - rainfall - in effect
-
-Rainfall, combined with melting snow, is expected. The frozen ground has a reduced ability to absorb this rainfall.
-
-###
-
-Water will likely pool on roads and in low-lying areas.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Avoid low-lying areas. Watch for washouts near rivers, creeks and culverts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>yellow warning - rainfall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/19/T_WZCN80_C_CWTO_202512281921_0615881252.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.0615881252.2025</guid><pubDate>Sun, 28 Dec 2025 19:23:42 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: rainfall
-
-yellow warning - rainfall - in effect
-
-Rainfall, combined with melting snow, is expected. The frozen ground has a reduced ability to absorb this rainfall.
-
-What:
-Total rain and freezing rain amounts of 15 to 30 mm.
-
-When:
-Continuing this afternoon and ending early Monday morning. 
-
-Additional information:
-Freezing rain will continue this afternoon and transition to rain this evening. Rain and freezing rain will be heavy at times through the afternoon and evening. The rain will ease early Monday morning.
-
-If possible, clear storm drains of snow and ice.
-
-###
-
-Water will likely pool on roads and in low-lying areas.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Avoid low-lying areas. Watch for washouts near rivers, creeks and culverts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>orange warning - freezing rain - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/18/T_WZCN80_C_CWTO_202512281853_3332520228.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.3332520228.2025</guid><pubDate>Sun, 28 Dec 2025 18:53:14 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: freezing rain
-
-orange warning - freezing rain - in effect
-
-###
-
-Roads and walkways will likely become icy and slippery. Travel will likely be hazardous and some routes will likely be impassable. Prolonged utility outages are likely.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Non-essential travel should be avoided.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>orange warning - freezing rain - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/18/T_WZCN80_C_CWTO_202512281851_2291307495.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.2291307495.2025</guid><pubDate>Sun, 28 Dec 2025 18:51:19 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: freezing rain
-
-orange warning - freezing rain - in effect
-
-###
-
-Roads and walkways will likely become icy and slippery. Travel will likely be hazardous and some routes will likely be impassable. Prolonged utility outages are likely.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Non-essential travel should be avoided.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>yellow warning - freezing rain - changed</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/18/T_WZCN80_C_CWTO_202512281851_1205228286.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.1205228286.2025</guid><pubDate>Sun, 28 Dec 2025 18:51:19 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: freezing rain
-
-yellow warning - freezing rain - changed
-
-###
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>orange watch - snow squall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/18/T_WZCN80_C_CWTO_202512281805_3394730543.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.3394730543.2025</guid><pubDate>Sun, 28 Dec 2025 18:07:31 +0000</pubDate><description>Area: Midland - Coldwater - Orr Lake
-
-Event: snow squall
-
-orange watch - snow squall - in effect
-
-Dangerous snow squalls and blizzard conditions Monday into Tuesday.
-
-What:
-Blizzard conditions with near zero visibility.
-Strong wind gusts of 60 to 80 km/h.
-Total local snowfall amounts of 20 to 30 cm by Tuesday morning.
-
-When:
-Monday afternoon into Tuesday.
-
-Additional information:
-A colder air mass in the wake of a departing low pressure system will result in the development of lake effect snow squalls off Georgian Bay. Widespread blowing snow and blizzard conditions will be the primary concern as northwesterly wind gusts of 60 to 80 km/h are expected.
-
-###
-
-Travel may be hazardous and some routes may be impassable. Visibility may be suddenly reduced to near zero at times. Road closures are possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Reschedule travel and outdoor activities. Prepare for the possibility of quickly changing and deteriorating travel conditions. Prepare for possible prolonged disruptions to transportation, services, and utilities.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>orange watch - snow squall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/18/T_WZCN80_C_CWTO_202512281805_1662182380.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.1662182380.2025</guid><pubDate>Sun, 28 Dec 2025 18:05:20 +0000</pubDate><description>Area: Midland - Coldwater - Orr Lake
-
-Event: snow squall
-
-orange watch - snow squall - in effect
-
-###
-
-Travel may be hazardous and some routes may be impassable. Visibility may be suddenly reduced to near zero at times. Road closures are possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Reschedule travel and outdoor activities. Prepare for the possibility of quickly changing and deteriorating travel conditions. Prepare for possible prolonged disruptions to transportation, services, and utilities.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>orange watch - snow squall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/17/T_WZCN80_C_CWTO_202512281711_3686276954.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.3686276954.2025</guid><pubDate>Sun, 28 Dec 2025 17:11:31 +0000</pubDate><description>Area: Midland - Coldwater - Orr Lake
-
-Event: snow squall
-
-orange watch - snow squall - in effect
-
-###
-
-Travel may be hazardous and some routes may be impassable. Visibility may be suddenly reduced to near zero at times. Road closures are possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Reschedule travel and outdoor activities. Prepare for the possibility of quickly changing and deteriorating travel conditions. Prepare for possible prolonged disruptions to transportation, services, and utilities.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>orange watch - snow squall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/17/T_WZCN80_C_CWTO_202512281711_2194739862.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.2194739862.2025</guid><pubDate>Sun, 28 Dec 2025 17:13:04 +0000</pubDate><description>Area: Midland - Coldwater - Orr Lake
-
-Event: snow squall
-
-orange watch - snow squall - in effect
-
-Dangerous snow squalls and blizzard conditions Monday into Tuesday.
-
-What:
-Blizzard conditions with near zero visibility.
-Strong wind gusts of 60 to 80 km/h.
-Total local snowfall amounts of 20 to 30 cm.
-
-When:
-Monday afternoon into Tuesday.
-
-Additional information:
-A colder air mass in the wake of a departing low pressure system will result in the development of lake effect snow squalls off Georgian Bay. Widespread blowing snow and blizzard conditions will be the primary concern as northwesterly wind gusts of 60 to 80 km/h are expected.
-
-###
-
-Travel may be hazardous and some routes may be impassable. Visibility may be suddenly reduced to near zero at times. Road closures are possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Reschedule travel and outdoor activities. Prepare for the possibility of quickly changing and deteriorating travel conditions. Prepare for possible prolonged disruptions to transportation, services, and utilities.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>special weather statement in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/15/T_WZCN88_C_CWTO_202512281535_1012762816.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.1012762816.2025</guid><pubDate>Sun, 28 Dec 2025 15:37:32 +0000</pubDate><description>Area: Watford - Pinery Park - Eastern Lambton County
-
-Event: weather
-
-special weather statement in effect
-
-Strong winds expected on Monday. 
-
-What: 
-Strong wind gusts of 70 to 80 km/h. 
-
-When: 
-Beginning Monday morning and easing Monday evening. 
-
-Additional information. 
-Strong southwesterly winds are expected to develop Monday morning 
-with the passage of a strong cold front. The winds will ease through 
-Monday evening as they shift around to the northwest. Areas that will receive ice build-up  from freezing rain will be most vulnerable.
-
-Local utility outages are possible. Damage to roofs, fences, 
-branches or soft shelters is possible. Some property damage is 
-possible. Secure loose objects.
-
-###
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>yellow warning - freezing rain - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/10/T_WZCN80_C_CWTO_202512281028_3874467227.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.3874467227.2025</guid><pubDate>Sun, 28 Dec 2025 10:31:44 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: freezing rain
-
-yellow warning - freezing rain - in effect
-
-Significant freezing rain expected today.
-
-What:  
-Freezing rain leading to icy surfaces.
-Ice accretion or build-up of 4 to 8 mm on some surfaces.  
-
-When:  
-Beginning near noon and ending this evening.
-  
-Additional information:  
-Freezing rain is expected to begin near noon and change over to rain late this afternoon or evening as temperatures climb above the freezing mark.
-
-###
-
-Roads and walkways will likely become icy and slippery. Icy surfaces could be difficult to detect. Local utility outages are possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>yellow warning - rainfall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/09/T_WZCN80_C_CWTO_202512280956_2462371612.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.2462371612.2025</guid><pubDate>Sun, 28 Dec 2025 10:02:59 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: rainfall
-
-yellow warning - rainfall - in effect
-
-Rainfall, combined with melting snow, is expected. The frozen ground has a reduced ability to absorb this rainfall.
-
-What:
-Total rain and freezing rain amounts of 15 to 30 mm.
-
-When:
-Beginning near noon and ending early Monday morning. 
-
-Additional information:
-Freezing rain will begin near noon and transition to rain this evening. Rain and freezing rain will be heavy at times through the afternoon and evening. The rain will ease early Monday morning.
-
-If possible, clear storm drains of snow and ice.
-
-###
-
-Water will likely pool on roads and in low-lying areas.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Avoid low-lying areas. Watch for washouts near rivers, creeks and culverts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>special weather statement in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/09/T_WZCN88_C_CWTO_202512280923_3235071809.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.3235071809.2025</guid><pubDate>Sun, 28 Dec 2025 09:35:48 +0000</pubDate><description>Area: Watford - Pinery Park - Eastern Lambton County
-
-Event: weather
-
-special weather statement in effect
-
-Strong winds expected on Monday. 
-
-What: 
-Strong wind gusts of 70 to 80 km/h. 
-
-When: 
-Beginning Monday morning and easing Monday evening. 
-
-Additional information. 
-Strong southwesterly winds are expected to develop Monday morning 
-with the passage of a strong cold front. The winds will ease through 
-Monday evening as they shift around to the northwest. Areas that will receive ice accretion from freezing rain will be most vulnerable.
-
-Local utility outages are possible. Damage to roofs, fences, 
-branches or soft shelters is possible. Some property damage is 
-possible. Secure loose objects.
-
-###
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>yellow warning - rainfall - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/04/T_WZCN80_C_CWTO_202512280434_1608323813.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.1608323813.2025</guid><pubDate>Sun, 28 Dec 2025 04:41:52 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: rainfall
-
-yellow warning - rainfall - in effect
-
-Rainfall, combined with melting snow, is expected. The frozen ground has a reduced ability to absorb this rainfall.
-
-What:
-Total rain and freezing rain amounts 15 to 30 mm.
-
-When:
-Beginning near midday Sunday and ending early Monday morning. 
-
-Additional information:
-Freezing rain will begin near midday Sunday, transitioning over to rain through Sunday evening. Rain and freezing rain will be heavy at times through the afternoon and evening. The rain will ease early Monday morning.
-
-###
-
-Water will likely pool on roads and in low-lying areas.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-Advice: Avoid low-lying areas. Watch for washouts near rivers, creeks and culverts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item><item><title>yellow warning - freezing rain - in effect</title><link>https://dd.weather.gc.ca/today/alerts/cap/20251228/CWTO/03/T_WZCN80_C_CWTO_202512280351_1670138474.cap</link><guid isPermaLink="false">urn:oid:2.49.0.1.124.1670138474.2025</guid><pubDate>Sun, 28 Dec 2025 03:55:37 +0000</pubDate><description>Area: Uxbridge - Beaverton - Northern Durham Region
-
-Event: freezing rain
-
-yellow warning - freezing rain - in effect
-
-Significant freezing rain expected Sunday.
-
-What:  
-Freezing rain leading to icy surfaces.
-Ice accretion or build-up of 4 to 8 mm on some surfaces.  
-
-When:  
-Beginning near midday Sunday and ending Sunday evening.
-  
-Additional information:  
-Freezing rain is expected to begin near midday on Sunday. The freezing rain will change over to rain late Sunday afternoon or evening as temperatures climb above the freezing mark.
-
-###
-
-Roads and walkways will likely become icy and slippery. Icy surfaces could be difficult to detect. Local utility outages are possible.
-
-Please continue to monitor alerts and forecasts issued by Environment Canada. To report severe weather, send an email to ONstorm@ec.gc.ca or post reports on X using #ONStorm.
-
-For more information about the alerting program, please visit: https://www.canada.ca/en/services/environment/weather/severeweather/weather-alerts/colour-coded-alerts.
-
-More info: https://weather.gc.ca/warnings/index_e.html?prov=on</description></item></channel>
-</rss>
+name: Update Tay weather RSS
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
+
+      - name: Run weather bot
+        env:
+          ENABLE_X_POSTING: "true"
+          ENABLE_FB_POSTING: "true"
+          X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
+          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+          X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
+
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+
+          # optional:
+          # TEST_TWEET: "true"
+          X_REFRESH_TOKEN_ROTATED_PATH: "x_refresh_token_rotated.txt"
+        run: |
+          python tay_weather_bot.py
+
+      - name: Update X_REFRESH_TOKEN secret if rotated
+        # Needs a PAT with permission to edit repo secrets.
+        # Store it as a repo secret called GH_SECRETS_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
+        run: |
+          if [ -f "x_refresh_token_rotated.txt" ]; then
+            echo "Rotated X refresh token detected; updating GitHub secret..."
+            gh secret set X_REFRESH_TOKEN --body "$(cat x_refresh_token_rotated.txt)"
+            rm -f x_refresh_token_rotated.txt
+          else
+            echo "No rotated refresh token file."
+          fi
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add tay-weather.xml state.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update RSS feed"
+            git push
+          fi
