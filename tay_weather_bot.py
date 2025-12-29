@@ -36,6 +36,13 @@ import requests
 from bs4 import BeautifulSoup
 
 
+def text_hash(s: str) -> str:
+    """Stable hash for deduping social posts across different CAP identifiers."""
+    s = (s or "").strip()
+    s = re.sub(r"\s+", " ", s)
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+
 # ----------------------------
 # Feature toggles
 # ----------------------------
@@ -157,7 +164,15 @@ def safe_int(x: Any, default: int) -> int:
 
 
 def load_state() -> dict:
-    default = {"seen_ids": [], "posted_guids": [], "cooldowns": {}, "global_last_post_ts": 0}
+    default = {
+        "seen_ids": [],
+        "posted_guids": [],
+        # X rejects duplicate tweet text even if it's a different alert.
+        # Track hashes of social text we have posted so we can skip safely.
+        "posted_text_hashes": [],
+        "cooldowns": {},
+        "global_last_post_ts": 0,
+    }
     if not os.path.exists(STATE_PATH):
         return default
 
@@ -173,6 +188,7 @@ def load_state() -> dict:
 
     data.setdefault("seen_ids", [])
     data.setdefault("posted_guids", [])
+    data.setdefault("posted_text_hashes", [])
     data.setdefault("cooldowns", {})
     data.setdefault("global_last_post_ts", 0)
     return data
@@ -181,6 +197,7 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     state["seen_ids"] = state.get("seen_ids", [])[-5000:]
     state["posted_guids"] = state.get("posted_guids", [])[-5000:]
+    state["posted_text_hashes"] = state.get("posted_text_hashes", [])[-5000:]
 
     cds = state.get("cooldowns", {})
     if isinstance(cds, dict) and len(cds) > 5000:
@@ -518,7 +535,8 @@ def get_oauth2_access_token() -> str:
     }
 
     r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
-    print("X token refresh:", r.status_code, r.text[:400])
+    # IMPORTANT: Never print token payloads (they leak secrets in GitHub Actions logs).
+    print("X token refresh status:", r.status_code)
     r.raise_for_status()
 
     payload = r.json()
@@ -549,6 +567,15 @@ def post_to_x(text: str) -> Dict[str, Any]:
     )
     print("X POST /2/tweets:", r.status_code, r.text[:500])
     if r.status_code >= 400:
+        # X returns 403 for duplicate tweet text. Treat as a soft failure so the
+        # workflow can continue and state can be updated to prevent retries.
+        try:
+            j = r.json()
+            detail = (j.get("detail") or "").lower()
+        except Exception:
+            detail = ""
+        if r.status_code == 403 and "duplicate" in detail:
+            raise RuntimeError("X_DUPLICATE_TWEET")
         raise RuntimeError(f"X post failed {r.status_code}: {r.text}")
     return r.json()
 
@@ -648,6 +675,7 @@ def main() -> None:
     state = load_state()
     seen = set(state.get("seen_ids", []))
     posted = set(state.get("posted_guids", []))
+    posted_text_hashes = set(state.get("posted_text_hashes", []))
 
     tree, channel = load_rss_tree()
 
@@ -710,16 +738,29 @@ def main() -> None:
                     continue
 
                 social_text = build_social_text(cap)
+                h = text_hash(social_text)
+                if h in posted_text_hashes:
+                    print("Social skipped: duplicate text hash already posted")
+                    posted.add(guid)
+                    continue
                 print("Social preview:", social_text.replace("\n", " | "))
                 print("Matched allowlisted area:", primary_allowlisted_area(cap))
 
                 if ENABLE_X_POSTING:
-                    post_to_x(social_text)
+                    try:
+                        post_to_x(social_text)
+                    except RuntimeError as e:
+                        # Treat X duplicate-content rejections as success so the workflow doesn't fail.
+                        if str(e) == "X_DUPLICATE_TWEET":
+                            print("X rejected duplicate tweet text; skipping.")
+                        else:
+                            raise
                 if ENABLE_FB_POSTING:
                     post_to_facebook_page(social_text)
 
                 social_posted += 1
                 posted.add(guid)
+                posted_text_hashes.add(h)
                 mark_posted(state, cap)
 
     # Update lastBuildDate
@@ -733,6 +774,7 @@ def main() -> None:
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
     state["seen_ids"] = list(seen)
     state["posted_guids"] = list(posted)
+    state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
 
     print(
