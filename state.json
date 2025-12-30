@@ -1,1 +1,7 @@
-{}
+{
+  "seen_ids": [],
+  "posted_guids": [],
+  "posted_text_hashes": [],
+  "cooldowns": {},
+  "global_last_post_ts": 0
+}

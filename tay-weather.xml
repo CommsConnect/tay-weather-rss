@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <rss version="2.0">
   <channel>
     <title>Tay Township Weather Alerts</title>
@@ -7,6 +7,6 @@
       Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas.
     </description>
     <language>en-ca</language>
-    <lastBuildDate>Mon, 01 Jan 2024 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Tue, 30 Dec 2025 19:54:15 +0000</lastBuildDate>
   </channel>
 </rss>
