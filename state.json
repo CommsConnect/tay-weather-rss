@@ -1,12 +1,12 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251230234320",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231095952"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231095952",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251230234320"
   ],
   "posted_text_hashes": [
-    "fe4fed3b24e8c069edbd73623a249b47d519265c",
-    "78222dfcd113641e37a7dc19bf4c4245fa3e9f00"
+    "78222dfcd113641e37a7dc19bf4c4245fa3e9f00",
+    "fe4fed3b24e8c069edbd73623a249b47d519265c"
   ],
   "cooldowns": {
     "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767177915
