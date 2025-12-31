@@ -443,6 +443,7 @@ def post_to_x(text: str) -> Dict[str, Any]:
 def post_to_facebook_page(message: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
     page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
+
     missing = [k for k, v in [
         ("FB_PAGE_ID", page_id),
         ("FB_PAGE_ACCESS_TOKEN", page_token),
@@ -451,17 +452,28 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
         raise RuntimeError(f"Missing required FB env vars: {', '.join(missing)}")
 
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
-    r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
-    print("FB POST /feed status:", r.status_code)
-    if r.status_code >= 400:
-        raise RuntimeError(f"Facebook post failed {r.status_code}")
-    return r.json()
+    r = requests.post(
+        url,
+        data={"message": message, "access_token": page_token},
+        timeout=30,
+    )
 
+    print("FB POST /feed status:", r.status_code)
+
+    if r.status_code >= 400:
+        print("FB error body:", r.text)  # 👈 THIS is the key line
+        raise RuntimeError(f"Facebook post failed {r.status_code}")
+
+    return r.json()
 
 # ----------------------------
 # Main
 # ----------------------------
 def main() -> None:
+    print("ENABLE_FB_POSTING =", ENABLE_FB_POSTING)
+    print("FB_PAGE_ID set =", bool(os.getenv("FB_PAGE_ID")))
+    print("FB_PAGE_ACCESS_TOKEN set =", bool(os.getenv("FB_PAGE_ACCESS_TOKEN")))
+
     # Clean up any previous rotated token file
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
         try:
