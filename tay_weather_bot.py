@@ -770,18 +770,21 @@ def main() -> None:
                             print("X rejected duplicate tweet text; skipping.")
                         else:
                             raise
-                 # Post to Facebook (non-fatal)
+                # Post to Facebook (non-fatal)
                 if ENABLE_FB_POSTING:
                     try:
                         post_to_facebook_page(social_text)
                     except RuntimeError as e:
-                         print(f"Facebook skipped: {e}")
-
-                social_posted += 1
-                posted.add(guid)
-                posted_text_hashes.add(h)
-                mark_posted(state, cap)
-
+                        print(f"Facebook skipped: {e}")
+                # Only count + mark as posted if something actually went out
+                if posted_anywhere:
+                    social_posted += 1
+                    posted.add(guid)
+                    posted_text_hashes.add(h)
+                    mark_posted(state, cap)
+                else:
+                    print("No social posts sent for this alert.")
+            
     # Update lastBuildDate
     lbd = channel.find("lastBuildDate")
     if lbd is None:
