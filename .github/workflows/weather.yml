@@ -37,7 +37,8 @@ jobs:
         env:
           ALERT_FEED_URL: "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
           TAY_COORDS_URL: "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-
+          
+          TEST_TWEET: "true"
           ENABLE_X_POSTING: "true"
           ENABLE_FB_POSTING: "true"
 
