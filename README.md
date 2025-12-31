@@ -1,50 +1,49 @@
 # Tay Township Weather Alerts (Automation)
 
-This repository monitors Weather Canada CAP alerts and Special Weather Statements for the Tay Township area and:
-- Updates an RSS feed (`tay-weather.xml`)
-- Posts updates to X, when enabled
-- Posts updates to a Facebook Page, when enabled
+This repo runs a GitHub Action every 5 minutes to:
+- poll Environment and Climate Change Canada (Weather Canada) **regional ATOM alert feed**
+- publish/refresh a local RSS file (`tay-weather.xml`)
+- optionally post updates to **X** and a **Facebook Page**
 
-## Coverage
-Alerts are filtered to the ECCC forecast region that covers Tay Township, but public posts use the friendlier label **“Tay Township area”**.
+Public-facing wording is tailored for Tay Township:
+- posts say **“Tay Township area”** (instead of “Midland – Coldwater – Orr Lake”)
+- “More info” links point to Tay’s **coords** location page on weather.gc.ca
 
-## How it runs
-GitHub Actions runs every 5 minutes (and can be run manually).
+## Data sources
 
-## More info link
-Posts and RSS items link to Tay Township conditions on Weather Canada:
-- https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
+- Regional ATOM feed (Midland–Coldwater–Orr Lake battleboard): `https://weather.gc.ca/rss/battleboard/onrm94_e.xml`
+- Official alert report page: `https://weather.gc.ca/warnings/report_e.html?onrm94`
+- Tay conditions page (coords): `https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768`
 
-## Safety features
-- Deduplication: prevents repeat posting of the same alert (by CAP identifier)
-- Text-hash dedupe: prevents X failures when two different alerts generate identical post text (X blocks duplicate tweet bodies)
-- Cooldowns by severity:
-  - Warnings: 60 minutes
-  - Watches: 90 minutes
-  - Advisories: 120 minutes
-  - Special Weather Statements: 180 minutes
-  - Cancels (all clear): 15 minutes
-- Daily cap: 15 posts per day (Free X API safety)
-- Kill switch: `ENABLE_X_POSTING` environment variable
-- Optional: `ENABLE_FB_POSTING` environment variable
+## Configuration (GitHub Actions env)
 
-## Security note
-If you previously ran the workflow when token payloads were printed in logs, rotate your X refresh token / client secret immediately.
+The workflow passes these (and the script has safe defaults):
 
-## Kill switch
-In `.github/workflows/weather.yml`, set:
-- `ENABLE_X_POSTING: "false"` to stop posting
-- `ENABLE_X_POSTING: "true"` to resume posting
+- `ALERT_FEED_URL` (default: `https://weather.gc.ca/rss/battleboard/onrm94_e.xml`)
+- `TAY_COORDS_URL` (default: `https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768`)
+- `ENABLE_X_POSTING` (`true`/`false`)
+- `ENABLE_FB_POSTING` (`true`/`false`)
 
-Similarly:
-- `ENABLE_FB_POSTING: "false"` to stop Facebook posting
+## Required GitHub Secrets
 
-## All clear behaviour
-When Weather Canada issues a Cancel message for an alert that was previously posted as active, the bot posts an “All clear” follow-up tweet.
+### X (OAuth2 refresh flow)
+- `X_CLIENT_ID`
+- `X_CLIENT_SECRET`
+- `X_REFRESH_TOKEN`
 
-To avoid confusion, cancellation tweets are not posted unless the bot previously posted the alert as active.
+(Optional) If you enable automatic refresh-token rotation, also set:
+- `GH_PAT_ACTIONS_SECRETS` (PAT that can update Actions secrets via `gh secret set`)
+
+### Facebook Page
+- `FB_PAGE_ID`
+- `FB_PAGE_ACCESS_TOKEN`
+
+> Facebook posting is **non-fatal** (workflow stays green if FB token expires).  
+> X duplicate-text is treated as a **soft skip**.
 
 ## Files
-- `tay_weather_bot.py`: main bot
-- `tay-weather.xml`: RSS output
-- `state.json`: bot state (seen alerts, cooldowns, posted IDs)
+
+- `tay_weather_bot.py` — main script
+- `tay-weather.xml` — generated RSS output (committed by Actions)
+- `state.json` — dedupe/cooldown state (committed by Actions)
+- `.github/workflows/weather.yml` — scheduled workflow
