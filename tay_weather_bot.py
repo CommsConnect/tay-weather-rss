@@ -36,13 +36,6 @@ import requests
 from bs4 import BeautifulSoup
 
 
-def text_hash(s: str) -> str:
-    """Stable hash for deduping social posts across different CAP identifiers."""
-    s = (s or "").strip()
-    s = re.sub(r"\s+", " ", s)
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
-
-
 # ----------------------------
 # Feature toggles
 # ----------------------------
@@ -93,15 +86,14 @@ USER_AGENT = "tay-weather-rss-bot/1.0"
 
 # Stable public “more info” URL (avoid CAP link 404s)
 MORE_INFO_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-
-# Tay Township "conditions" landing pages (coords format)
-TAY_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-WAUBAUSHENE_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.754,-79.710"
-VICTORIA_HARBOUR_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-PORT_MCNICOLL_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.749,-79.811"
-
-# Display name to use in social posts (instead of ECCC forecast-region strings)
-TAY_DISPLAY_AREA = "Tay Township area"
+ALERT_FEED_URL = "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"  # Midland–Coldwater–Orr Lake alert feed
+DISPLAY_AREA_NAME = "Tay Township area"
+COMMUNITY_COORDS = {
+    "Tay Township": (44.751, -79.768),
+    "Waubaushene": (44.754, -79.710),
+    "Victoria Harbour": (44.751, -79.768),
+    "Port McNicoll": (44.749, -79.811),
+}
 
 # When X rotates refresh tokens, we write the newest value here
 ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
@@ -173,15 +165,7 @@ def safe_int(x: Any, default: int) -> int:
 
 
 def load_state() -> dict:
-    default = {
-        "seen_ids": [],
-        "posted_guids": [],
-        # X rejects duplicate tweet text even if it's a different alert.
-        # Track hashes of social text we have posted so we can skip safely.
-        "posted_text_hashes": [],
-        "cooldowns": {},
-        "global_last_post_ts": 0,
-    }
+    default = {"seen_ids": [], "posted_guids": [], "cooldowns": {}, "global_last_post_ts": 0}
     if not os.path.exists(STATE_PATH):
         return default
 
@@ -197,7 +181,6 @@ def load_state() -> dict:
 
     data.setdefault("seen_ids", [])
     data.setdefault("posted_guids", [])
-    data.setdefault("posted_text_hashes", [])
     data.setdefault("cooldowns", {})
     data.setdefault("global_last_post_ts", 0)
     return data
@@ -206,7 +189,6 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     state["seen_ids"] = state.get("seen_ids", [])[-5000:]
     state["posted_guids"] = state.get("posted_guids", [])[-5000:]
-    state["posted_text_hashes"] = state.get("posted_text_hashes", [])[-5000:]
 
     cds = state.get("cooldowns", {})
     if isinstance(cds, dict) and len(cds) > 5000:
@@ -253,6 +235,72 @@ def pick_info_block(root: ET.Element) -> Optional[ET.Element]:
             return info
     return infos[0]
 
+
+
+# ----------------------------
+# Regional ATOM feed helpers
+# ----------------------------
+ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
+
+def fetch_atom_entries(feed_url: str) -> List[Dict[str, Any]]:
+    """Fetch and parse a Weather.gc.ca regional ATOM feed. Returns newest-first entries."""
+    r = requests.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=20)
+    r.raise_for_status()
+    root = ET.fromstring(r.text)
+    entries: List[Dict[str, Any]] = []
+    for e in root.findall("a:entry", ATOM_NS):
+        def t(tag: str) -> str:
+            el = e.find(f"a:{tag}", ATOM_NS)
+            return (el.text or "").strip() if el is not None else ""
+        link_el = e.find("a:link", ATOM_NS)
+        link = link_el.attrib.get("href", "").strip() if link_el is not None else ""
+        entries.append({
+            "id": t("id"),
+            "updated": t("updated"),
+            "title": t("title"),
+            "summary": t("summary"),
+            "link": link,
+        })
+    # Newest first by updated
+    def key(ent: Dict[str, Any]):
+        try:
+            return datetime.fromisoformat(ent.get("updated", "").replace("Z", "+00:00"))
+        except Exception:
+            return datetime(1970, 1, 1, tzinfo=timezone.utc)
+    entries.sort(key=key, reverse=True)
+    return entries
+
+def atom_entry_to_alert(ent: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert an ATOM entry into a minimal 'alert' dict that reuses the CAP-style pipeline.
+    """
+    title = (ent.get("title") or "").strip()
+    summary = (ent.get("summary") or "").strip()
+    updated = (ent.get("updated") or "").strip()
+    alert_id = (ent.get("id") or title or updated).strip()
+
+    # Example title: "ORANGE WARNING - SNOW SQUALL, Midland - Coldwater - Orr Lake"
+    event = ""
+    headline = title
+    if " - " in title:
+        # Split "LEVEL TYPE - EVENT, Region"
+        _, rest = title.split(" - ", 1)
+        # Event is before comma
+        event = rest.split(",", 1)[0].strip()
+    if not event:
+        event = title.split(",", 1)[0].strip()
+
+    return {
+        "identifier": alert_id,
+        "from_atom": True,
+        "sent": updated,
+        "event": event,
+        "headline": headline,
+        "summary": summary,
+        "areaDesc": DISPLAY_AREA_NAME,
+        "more_info": MORE_INFO_URL,
+        "source_link": ent.get("link") or "",
+    }
 
 def parse_cap(xml_text: str) -> Dict[str, Any]:
     root = ET.fromstring(xml_text)
@@ -324,6 +372,9 @@ def primary_allowlisted_area(cap: Dict[str, Any]) -> str:
 
 
 def area_matches(cap: Dict[str, Any]) -> bool:
+    # If we are using the regional ATOM feed, the feed itself is already scoped to our region.
+    if cap.get("from_atom"):
+        return True
     areas = cap.get("areas", []) or []
     if STRICT_AREA_MATCH and not areas:
         return False
@@ -544,8 +595,7 @@ def get_oauth2_access_token() -> str:
     }
 
     r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
-    # IMPORTANT: Never print token payloads (they leak secrets in GitHub Actions logs).
-    print("X token refresh status:", r.status_code)
+    print("X token refresh:", r.status_code, r.text[:400])
     r.raise_for_status()
 
     payload = r.json()
@@ -574,23 +624,10 @@ def post_to_x(text: str) -> Dict[str, Any]:
         },
         timeout=20,
     )
-    # IMPORTANT: Never print response bodies. They can contain sensitive details,
-    # and GitHub Actions logs are persistent.
-    print("X POST /2/tweets status:", r.status_code)
+    print("X POST /2/tweets:", r.status_code, r.text[:500])
     if r.status_code >= 400:
-        # X returns 403 for duplicate tweet text. Treat as a soft failure so the
-        # workflow can continue and state can be updated to prevent retries.
-        try:
-            j = r.json()
-            detail = (j.get("detail") or "").lower()
-        except Exception:
-            detail = ""
-        if r.status_code == 403 and "duplicate" in detail:
-            raise RuntimeError("X_DUPLICATE_TWEET")
-        # Do not include r.text in errors (it lands in logs).
-        raise RuntimeError(f"X post failed {r.status_code}")
+        raise RuntimeError(f"X post failed {r.status_code}: {r.text}")
     return r.json()
-
 
 
 # ----------------------------
@@ -608,31 +645,20 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
 
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
     r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
-    # IMPORTANT: Never print response bodies in CI logs.
-    print("FB POST /feed status:", r.status_code)
+    print("FB POST /feed:", r.status_code, r.text[:500])
     if r.status_code >= 400:
-        # FB errors are usually safe, but still avoid dumping full bodies.
-        try:
-            j = r.json()
-            msg = (((j.get("error") or {}).get("message")) or "").strip()
-        except Exception:
-            msg = ""
-        if msg:
-            raise RuntimeError(f"Facebook post failed {r.status_code}: {msg}")
-        raise RuntimeError(f"Facebook post failed {r.status_code}")
+        raise RuntimeError(f"Facebook post failed {r.status_code}: {r.text}")
     return r.json()
 
 
-
 def build_areas_short(cap: Dict[str, Any]) -> str:
-    """
-    Return the area label to display publicly.
-
-    We intentionally avoid using long ECCC forecast-region strings (e.g.,
-    "Midland - Coldwater - Orr Lake") in social posts and instead use a
-    Tay-specific label.
-    """
-    return TAY_DISPLAY_AREA
+    area = primary_allowlisted_area(cap)
+    if not area:
+        return "Tay Township area"
+    s = area.strip()
+    if len(s) > 70:
+        s = s[:67].rstrip() + "…"
+    return s
 
 
 def extract_advice_short(cap: Dict[str, Any]) -> str:
@@ -693,17 +719,12 @@ def main() -> None:
         if ENABLE_X_POSTING:
             post_to_x(text)
         if ENABLE_FB_POSTING:
-            try:
-                post_to_facebook_page(text)
-            except RuntimeError as e:
-                print(f"Facebook skipped: {e}")
+            post_to_facebook_page(text)
         return
 
     state = load_state()
     seen = set(state.get("seen_ids", []))
     posted = set(state.get("posted_guids", []))
-    posted_text_hashes = set(state.get("posted_text_hashes", []))
-    posted_text_hashes = set(state.get("posted_text_hashes", []))
 
     tree, channel = load_rss_tree()
 
@@ -711,93 +732,62 @@ def main() -> None:
     social_posted = 0
     social_skipped_cooldown = 0
 
-    for yyyymmdd, hh in utc_dirs_to_check(HOURS_BACK_TO_SCAN):
-        for office in OFFICES:
-            directory_url = f"https://dd.weather.gc.ca/today/alerts/cap/{yyyymmdd}/{office}/{hh}/"
-            try:
-                cap_urls = list_cap_files(directory_url)
-            except Exception as e:
-                # Directory 404s are normal (not every hour exists)
-                print("Directory fetch failed:", directory_url, str(e))
-                continue
+    # Pull alerts from the regional Weather.gc.ca ATOM feed (no CAP directory probing).
+    try:
+        atom_entries = fetch_atom_entries(ALERT_FEED_URL)
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch ATOM feed: {e}")
 
-            for cap_url in cap_urls:
-                try:
-                    resp = requests.get(cap_url, headers={"User-Agent": USER_AGENT}, timeout=20)
-                    resp.raise_for_status()
-                    cap = parse_cap(resp.text)
-                except Exception as e:
-                    print("CAP fetch/parse failed:", cap_url, str(e))
-                    continue
+    for ent in atom_entries:
+        cap = atom_entry_to_alert(ent)
+        cap_id = (cap.get("identifier") or "").strip()
+        if not cap_id:
+            continue
 
-                cap_id = (cap.get("identifier") or "").strip()
-                if not cap_id:
-                    continue
+        if cap_id in seen:
+            continue
+        seen.add(cap_id)
 
-                if cap_id in seen:
-                    continue
-                seen.add(cap_id)
+        if not should_include_event(cap):
+            continue
+        if not area_matches(cap):
+            continue
 
-                if not should_include_event(cap):
-                    continue
-                if not area_matches(cap):
-                    continue
+        title = (cap.get("headline") or cap.get("event") or "Weather alert").strip()
+        pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
+        guid = cap_id
 
-                title = (cap.get("headline") or cap.get("event") or "Weather alert").strip()
-                pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
-                guid = cap_id
+        # IMPORTANT: stable link (avoid CAP link 404)
+        link = MORE_INFO_URL
+        description = build_rss_description(cap)
 
-                # IMPORTANT: stable link (avoid CAP link 404)
-                link = MORE_INFO_URL
-                description = build_rss_description(cap)
+        if not rss_item_exists(channel, guid):
+            add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
+            new_rss_items += 1
 
-                if not rss_item_exists(channel, guid):
-                    add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
-                    new_rss_items += 1
+        # Social posting (dedupe + cooldown)
+        if guid in posted:
+            continue
 
-                # Social posting (dedupe + cooldown)
-                if guid in posted:
-                    continue
+        allowed, reason = cooldown_allows_post(state, cap)
+        if not allowed:
+            social_skipped_cooldown += 1
+            print("Social skipped:", reason)
+            continue
 
-                allowed, reason = cooldown_allows_post(state, cap)
-                if not allowed:
-                    social_skipped_cooldown += 1
-                    print("Social skipped:", reason)
-                    continue
+        social_text = build_social_text(cap)
+        print("Social preview:", social_text.replace("\n", " | "))
+        print("Matched allowlisted area:", primary_allowlisted_area(cap))
 
-                social_text = build_social_text(cap)
-                h = text_hash(social_text)
-                if h in posted_text_hashes:
-                    print("Social skipped: duplicate text hash already posted")
-                    posted.add(guid)
-                    continue
-                print("Social preview:", social_text.replace("\n", " | "))
-                print("Matched allowlisted area:", primary_allowlisted_area(cap))
+        if ENABLE_X_POSTING:
+            post_to_x(social_text)
+        if ENABLE_FB_POSTING:
+            post_to_facebook_page(social_text)
 
-                if ENABLE_X_POSTING:
-                    try:
-                        post_to_x(social_text)
-                    except RuntimeError as e:
-                        # Treat X duplicate-content rejections as success so the workflow doesn't fail.
-                        if str(e) == "X_DUPLICATE_TWEET":
-                            print("X rejected duplicate tweet text; skipping.")
-                        else:
-                            raise
-                # Post to Facebook (non-fatal)
-                if ENABLE_FB_POSTING:
-                    try:
-                        post_to_facebook_page(social_text)
-                    except RuntimeError as e:
-                        print(f"Facebook skipped: {e}")
-                # Only count + mark as posted if something actually went out
-                if posted_anywhere:
-                    social_posted += 1
-                    posted.add(guid)
-                    posted_text_hashes.add(h)
-                    mark_posted(state, cap)
-                else:
-                    print("No social posts sent for this alert.")
-            
+        social_posted += 1
+        posted.add(guid)
+        mark_posted(state, cap)
+
     # Update lastBuildDate
     lbd = channel.find("lastBuildDate")
     if lbd is None:
@@ -809,7 +799,6 @@ def main() -> None:
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
     state["seen_ids"] = list(seen)
     state["posted_guids"] = list(posted)
-    state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
 
     print(
