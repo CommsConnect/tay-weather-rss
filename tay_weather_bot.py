@@ -470,10 +470,7 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
 # Main
 # ----------------------------
 def main() -> None:
-    print("ENABLE_FB_POSTING =", ENABLE_FB_POSTING)
-    print("FB_PAGE_ID set =", bool(os.getenv("FB_PAGE_ID")))
-    print("FB_PAGE_ACCESS_TOKEN set =", bool(os.getenv("FB_PAGE_ACCESS_TOKEN")))
-
+    
     # Clean up any previous rotated token file
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
         try:
