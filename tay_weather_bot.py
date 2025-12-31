@@ -86,14 +86,14 @@ USER_AGENT = "tay-weather-rss-bot/1.0"
 
 # Stable public “more info” URL (avoid CAP link 404s)
 MORE_INFO_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-ALERT_FEED_URL = "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"  # Midland–Coldwater–Orr Lake alert feed
+TAY_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
+WAUBAUSHENE_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.754,-79.710"
+VICTORIA_HARBOUR_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
+PORT_MCNICOLL_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.749,-79.811"
+
+ALERT_FEED_URL = "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
 DISPLAY_AREA_NAME = "Tay Township area"
-COMMUNITY_COORDS = {
-    "Tay Township": (44.751, -79.768),
-    "Waubaushene": (44.754, -79.710),
-    "Victoria Harbour": (44.751, -79.768),
-    "Port McNicoll": (44.749, -79.811),
-}
+
 
 # When X rotates refresh tokens, we write the newest value here
 ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
@@ -218,6 +218,103 @@ def list_cap_files(directory_url: str) -> List[str]:
     return sorted(set(out))
 
 
+
+# ----------------------------
+# ATOM (regional alert feed) helpers
+# ----------------------------
+ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
+
+def _parse_atom_dt(s: str) -> dt.datetime:
+    # Example: 2025-12-30T23:43:20Z
+    if not s:
+        return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+    return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+def fetch_atom_entries(feed_url: str, retries: int = 3, timeout: Tuple[int, int] = (5, 20)) -> List[Dict[str, Any]]:
+    """Fetch and parse an ATOM feed. Returns entries newest-first.
+
+    Non-200 responses raise; callers may choose to treat failures as non-fatal.
+    """
+    last_err: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            r = requests.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+            r.raise_for_status()
+            root = ET.fromstring(r.content)
+
+            entries: List[Dict[str, Any]] = []
+            for e in root.findall("a:entry", ATOM_NS):
+                title = (e.findtext("a:title", default="", namespaces=ATOM_NS) or "").strip()
+                link = ""
+                link_el = e.find("a:link[@type='text/html']", ATOM_NS)
+                if link_el is None:
+                    link_el = e.find("a:link", ATOM_NS)
+                if link_el is not None:
+                    link = (link_el.get("href") or "").strip()
+
+                updated = (e.findtext("a:updated", default="", namespaces=ATOM_NS) or "").strip()
+                published = (e.findtext("a:published", default="", namespaces=ATOM_NS) or "").strip()
+                entry_id = (e.findtext("a:id", default="", namespaces=ATOM_NS) or "").strip()
+                summary = (e.findtext("a:summary", default="", namespaces=ATOM_NS) or "").strip()
+
+                entries.append({
+                    "id": entry_id,
+                    "title": title,
+                    "link": link,
+                    "updated": updated,
+                    "published": published,
+                    "summary": summary,
+                    "updated_dt": _parse_atom_dt(updated or published),
+                })
+
+            entries.sort(key=lambda x: x["updated_dt"], reverse=True)
+            return entries
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise
+    # should never reach
+    raise last_err if last_err else RuntimeError("Failed to fetch ATOM feed")
+
+def atom_title_for_tay(title: str) -> str:
+    """Replace forecast-region wording with Tay Township wording for public posts."""
+    if not title:
+        return title
+    # Often looks like: 'ORANGE WARNING - SNOW SQUALL, Midland - Coldwater - Orr Lake'
+    t = title.replace(", Midland - Coldwater - Orr Lake", f" ({DISPLAY_AREA_NAME})")
+    t = t.replace("Midland - Coldwater - Orr Lake", DISPLAY_AREA_NAME)
+    return t
+
+def atom_entry_guid(entry: Dict[str, Any]) -> str:
+    return (entry.get("id") or entry.get("link") or entry.get("title") or "").strip()
+
+def build_social_text_from_atom(entry: Dict[str, Any]) -> str:
+    # Keep it short and consistent for Tay Township.
+    title = atom_title_for_tay((entry.get("title") or "").strip())
+    issued = (entry.get("summary") or "").strip()
+    parts = [f"⚠️ {title}"]
+    if issued:
+        parts.append(issued)
+    parts.append(f"More: {MORE_INFO_URL}")
+    # Use existing Tay hashtags (kept short when possible)
+    parts.append("#TayTownship #ONStorm")
+    text = " | ".join([p for p in parts if p])
+    return text if len(text) <= 280 else (text[:277].rstrip() + "…")
+
+def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
+    title = atom_title_for_tay((entry.get("title") or "").strip())
+    issued = (entry.get("summary") or "").strip()
+    official = (entry.get("link") or "").strip()
+    bits = [title]
+    if issued:
+        bits.append(issued)
+    bits.append(f"More info (Tay Township): {MORE_INFO_URL}")
+    if official:
+        bits.append(f"Official alert details: {official}")
+    return "\n".join(bits)
+
 def find_text(elem: Optional[ET.Element], tag_name: str) -> str:
     if elem is None:
         return ""
@@ -235,72 +332,6 @@ def pick_info_block(root: ET.Element) -> Optional[ET.Element]:
             return info
     return infos[0]
 
-
-
-# ----------------------------
-# Regional ATOM feed helpers
-# ----------------------------
-ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
-
-def fetch_atom_entries(feed_url: str) -> List[Dict[str, Any]]:
-    """Fetch and parse a Weather.gc.ca regional ATOM feed. Returns newest-first entries."""
-    r = requests.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=20)
-    r.raise_for_status()
-    root = ET.fromstring(r.text)
-    entries: List[Dict[str, Any]] = []
-    for e in root.findall("a:entry", ATOM_NS):
-        def t(tag: str) -> str:
-            el = e.find(f"a:{tag}", ATOM_NS)
-            return (el.text or "").strip() if el is not None else ""
-        link_el = e.find("a:link", ATOM_NS)
-        link = link_el.attrib.get("href", "").strip() if link_el is not None else ""
-        entries.append({
-            "id": t("id"),
-            "updated": t("updated"),
-            "title": t("title"),
-            "summary": t("summary"),
-            "link": link,
-        })
-    # Newest first by updated
-    def key(ent: Dict[str, Any]):
-        try:
-            return datetime.fromisoformat(ent.get("updated", "").replace("Z", "+00:00"))
-        except Exception:
-            return datetime(1970, 1, 1, tzinfo=timezone.utc)
-    entries.sort(key=key, reverse=True)
-    return entries
-
-def atom_entry_to_alert(ent: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Convert an ATOM entry into a minimal 'alert' dict that reuses the CAP-style pipeline.
-    """
-    title = (ent.get("title") or "").strip()
-    summary = (ent.get("summary") or "").strip()
-    updated = (ent.get("updated") or "").strip()
-    alert_id = (ent.get("id") or title or updated).strip()
-
-    # Example title: "ORANGE WARNING - SNOW SQUALL, Midland - Coldwater - Orr Lake"
-    event = ""
-    headline = title
-    if " - " in title:
-        # Split "LEVEL TYPE - EVENT, Region"
-        _, rest = title.split(" - ", 1)
-        # Event is before comma
-        event = rest.split(",", 1)[0].strip()
-    if not event:
-        event = title.split(",", 1)[0].strip()
-
-    return {
-        "identifier": alert_id,
-        "from_atom": True,
-        "sent": updated,
-        "event": event,
-        "headline": headline,
-        "summary": summary,
-        "areaDesc": DISPLAY_AREA_NAME,
-        "more_info": MORE_INFO_URL,
-        "source_link": ent.get("link") or "",
-    }
 
 def parse_cap(xml_text: str) -> Dict[str, Any]:
     root = ET.fromstring(xml_text)
@@ -372,9 +403,6 @@ def primary_allowlisted_area(cap: Dict[str, Any]) -> str:
 
 
 def area_matches(cap: Dict[str, Any]) -> bool:
-    # If we are using the regional ATOM feed, the feed itself is already scoped to our region.
-    if cap.get("from_atom"):
-        return True
     areas = cap.get("areas", []) or []
     if STRICT_AREA_MATCH and not areas:
         return False
@@ -732,34 +760,26 @@ def main() -> None:
     social_posted = 0
     social_skipped_cooldown = 0
 
-    # Pull alerts from the regional Weather.gc.ca ATOM feed (no CAP directory probing).
+    # Fetch regional ATOM alert feed (source-of-truth) instead of probing CAP directories.
     try:
         atom_entries = fetch_atom_entries(ALERT_FEED_URL)
     except Exception as e:
-        raise RuntimeError(f"Failed to fetch ATOM feed: {e}")
+        # Non-fatal: Weather Canada can time out or throttle occasionally.
+        print(f"⚠️ ATOM feed unavailable: {e}")
+        print("Exiting cleanly; will retry on next scheduled run.")
+        return
 
-    for ent in atom_entries:
-        cap = atom_entry_to_alert(ent)
-        cap_id = (cap.get("identifier") or "").strip()
-        if not cap_id:
+    for entry in atom_entries:
+        guid = atom_entry_guid(entry)
+        if not guid:
             continue
 
-        if cap_id in seen:
-            continue
-        seen.add(cap_id)
-
-        if not should_include_event(cap):
-            continue
-        if not area_matches(cap):
-            continue
-
-        title = (cap.get("headline") or cap.get("event") or "Weather alert").strip()
-        pub_date = rfc2822_date_from_sent(cap.get("sent", ""))
-        guid = cap_id
-
-        # IMPORTANT: stable link (avoid CAP link 404)
+        # RSS item title/description
+        title = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
+        pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
+        pub_date = email.utils.format_datetime(pub_dt)
         link = MORE_INFO_URL
-        description = build_rss_description(cap)
+        description = build_rss_description_from_atom(entry)
 
         if not rss_item_exists(channel, guid):
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
@@ -769,24 +789,49 @@ def main() -> None:
         if guid in posted:
             continue
 
-        allowed, reason = cooldown_allows_post(state, cap)
+        # Cooldown is keyed on the allowlisted area; for ATOM we treat all as Tay Township area.
+        allowed, reason = cooldown_allows_post(state, {"areas": []})
         if not allowed:
             social_skipped_cooldown += 1
             print("Social skipped:", reason)
             continue
 
-        social_text = build_social_text(cap)
-        print("Social preview:", social_text.replace("\n", " | "))
-        print("Matched allowlisted area:", primary_allowlisted_area(cap))
+        social_text = build_social_text_from_atom(entry)
+        h = text_hash(social_text)
+        if h in posted_text_hashes:
+            print("Social skipped: duplicate text hash already posted")
+            posted.add(guid)
+            continue
+
+        print("Social preview:", social_text.replace("\n", " "))
+
+        posted_anywhere = False
 
         if ENABLE_X_POSTING:
-            post_to_x(social_text)
-        if ENABLE_FB_POSTING:
-            post_to_facebook_page(social_text)
+            try:
+                post_to_x(social_text)
+                posted_anywhere = True
+            except RuntimeError as e:
+                if str(e) == "X_DUPLICATE_TWEET":
+                    print("X rejected duplicate tweet text; skipping.")
+                else:
+                    raise
 
-        social_posted += 1
-        posted.add(guid)
-        mark_posted(state, cap)
+        if ENABLE_FB_POSTING:
+            try:
+                post_to_facebook_page(social_text)
+                posted_anywhere = True
+            except RuntimeError as e:
+                print(f"Facebook skipped: {e}")
+
+        if posted_anywhere:
+            social_posted += 1
+            posted.add(guid)
+            posted_text_hashes.add(h)
+            # Record a post time for cooldown purposes.
+            mark_posted(state, {"areas": []})
+        else:
+            print("No social posts sent for this alert.")
 
     # Update lastBuildDate
     lbd = channel.find("lastBuildDate")
