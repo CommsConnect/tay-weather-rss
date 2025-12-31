@@ -86,12 +86,18 @@ USER_AGENT = "tay-weather-rss-bot/1.0"
 
 # Stable public “more info” URL (avoid CAP link 404s)
 MORE_INFO_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-TAY_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
+TAY_COORDS_URL = os.getenv("TAY_COORDS_URL", "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768")
+COMMUNITY_COORDS_URLS = {
+    "Tay Township": TAY_COORDS_URL,
+    "Waubaushene": "https://weather.gc.ca/en/location/index.html?coords=44.754,-79.710",
+    "Victoria Harbour": "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
+    "Port McNicoll": "https://weather.gc.ca/en/location/index.html?coords=44.749,-79.811",
+}
 WAUBAUSHENE_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.754,-79.710"
 VICTORIA_HARBOUR_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
 PORT_MCNICOLL_COORDS_URL = "https://weather.gc.ca/en/location/index.html?coords=44.749,-79.811"
 
-ALERT_FEED_URL = "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
+ALERT_FEED_URL = os.getenv("ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml")
 DISPLAY_AREA_NAME = "Tay Township area"
 
 
@@ -747,7 +753,10 @@ def main() -> None:
         if ENABLE_X_POSTING:
             post_to_x(text)
         if ENABLE_FB_POSTING:
-            post_to_facebook_page(text)
+            try:
+                post_to_facebook_page(text)
+            except RuntimeError as e:
+                print(f"Facebook skipped: {e}")
         return
 
     state = load_state()
