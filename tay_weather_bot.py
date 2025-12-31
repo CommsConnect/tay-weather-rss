@@ -629,7 +629,7 @@ def get_oauth2_access_token() -> str:
     }
 
     r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
-    print("X token refresh:", r.status_code, r.text[:400])
+    print("X token refresh status:", r.status_code)
     r.raise_for_status()
 
     payload = r.json()
@@ -658,9 +658,9 @@ def post_to_x(text: str) -> Dict[str, Any]:
         },
         timeout=20,
     )
-    print("X POST /2/tweets:", r.status_code, r.text[:500])
+    print("X POST /2/tweets status:", r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"X post failed {r.status_code}: {r.text}")
+        raise RuntimeError(f"X post failed {r.status_code}")
     return r.json()
 
 
@@ -679,9 +679,9 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
 
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
     r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
-    print("FB POST /feed:", r.status_code, r.text[:500])
+    print("FB POST /feed status:", r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"Facebook post failed {r.status_code}: {r.text}")
+        raise RuntimeError(f"Facebook post failed {r.status_code}")
     return r.json()
 
 
@@ -865,4 +865,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
- 
