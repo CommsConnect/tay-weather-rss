@@ -3,13 +3,15 @@
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251230234320",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101114449",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231182159"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231182159",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101171209"
   ],
   "posted_text_hashes": [
+    "3339ad824fbfd7d61b1e96be4461282fbe60e7f2",
     "09bed06a6ec6556d656a8c97142f5e8d44792137"
   ],
   "cooldowns": {
-    "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767279786
+    "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767293876
   },
-  "global_last_post_ts": 1767279786
+  "global_last_post_ts": 1767293876
 }
