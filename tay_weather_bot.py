@@ -1,13 +1,48 @@
+# tay_weather_bot.py
+#
+# Tay Township Weather Bot
+# - Pulls Environment Canada alerts from regional ATOM feed (source of truth)
+# - Writes RSS feed: tay-weather.xml
+# - Posts to X automatically (OAuth 2.0 refresh token)
+# - Uploads media to X via OAuth 1.0a user context (required for media upload)
+# - Posts to Facebook Page automatically (Page access token), supports photo carousels
+# - Supports cooldowns + dedupe
+#
+# REQUIRED GitHub Secrets (X OAuth 2.0 posting):
+#   X_CLIENT_ID
+#   X_CLIENT_SECRET
+#   X_REFRESH_TOKEN
+#
+# REQUIRED GitHub Secrets (X media upload via OAuth 1.0a user context):
+#   X_API_KEY
+#   X_API_SECRET
+#   X_ACCESS_TOKEN
+#   X_ACCESS_TOKEN_SECRET
+#
+# REQUIRED GitHub Secrets (Facebook Page posting):
+#   FB_PAGE_ID
+#   FB_PAGE_ACCESS_TOKEN
+#
+# OPTIONAL workflow env vars:
+#   ENABLE_X_POSTING=true|false
+#   ENABLE_FB_POSTING=true|false
+#   TEST_TWEET=true
+#   ALERT_FEED_URL=<ATOM feed url>
+#   TAY_COORDS_URL=<coords link>
+#   CR29_NORTH_IMAGE_URL=<direct image url OR https://511on.ca/map/Cctv/<id>>
+#   CR29_SOUTH_IMAGE_URL=<direct image url OR https://511on.ca/map/Cctv/<id>>
+#   ON511_CAMERA_KEYWORD=<default: CR-29>
+#
 import base64
+import datetime as dt
+import email.utils
+import hashlib
 import json
 import os
 import re
 import time
-import hashlib
-import datetime as dt
-import email.utils
 import xml.etree.ElementTree as ET
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from requests_oauthlib import OAuth1
@@ -19,7 +54,6 @@ from requests_oauthlib import OAuth1
 ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
 ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
 TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
-TEST_JSON = os.getenv("TEST_JSON", "false").lower() == "true"
 
 
 # ----------------------------
@@ -27,8 +61,9 @@ TEST_JSON = os.getenv("TEST_JSON", "false").lower() == "true"
 # ----------------------------
 STATE_PATH = "state.json"
 RSS_PATH = "tay-weather.xml"
+ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
 
-USER_AGENT = "tay-weather-rss-bot/1.0"
+USER_AGENT = "tay-weather-rss-bot/1.1"
 
 # Public “more info” URL (Tay coords format)
 TAY_COORDS_URL = os.getenv(
@@ -40,8 +75,25 @@ MORE_INFO_URL = TAY_COORDS_URL
 ALERT_FEED_URL = os.getenv("ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml").strip()
 DISPLAY_AREA_NAME = "Tay Township area"
 
-# When X rotates refresh tokens, we write the newest value here
-ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
+# Ontario 511 cameras API
+ON511_CAMERAS_API = "https://511on.ca/api/v2/get/cameras"
+ON511_CAMERA_KEYWORD = os.getenv("ON511_CAMERA_KEYWORD", "CR-29").strip() or "CR-29"
+
+
+# ----------------------------
+# Severity emoji
+# ----------------------------
+
+def severity_emoji(title: str) -> str:
+    """Advisory=🟡, Watch=🟠, Warning=🔴, other=⚪"""
+    t = (title or "").lower()
+    if "warning" in t:
+        return "🔴"
+    if "watch" in t:
+        return "🟠"
+    if "advisory" in t:
+        return "🟡"
+    return "⚪"
 
 
 # ----------------------------
@@ -62,6 +114,7 @@ GLOBAL_COOLDOWN_MINUTES = 5
 # ----------------------------
 # Generic helpers
 # ----------------------------
+
 def normalize(s: str) -> str:
     if not s:
         return ""
@@ -83,33 +136,7 @@ def safe_int(x: Any, default: int) -> int:
 
 
 def text_hash(s: str) -> str:
-    """Stable short hash used to dedupe near-identical social posts across runs."""
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
-
-
-def severity_emoji(title: str) -> str:
-    """
-    Maps Environment Canada alert types to an emoji.
-    Requested mapping: yellow/red/orange based on severity.
-    """
-    t = (title or "").lower()
-    if "warning" in t:
-        return "🔴"
-    if "watch" in t:
-        return "🟠"
-    if "advisory" in t:
-        return "🟡"
-    if "statement" in t:
-        return "🟡"
-    return "🟡"
-
-
-def get_cr29_image_url() -> str:
-    """
-    Picks North first, then South (you can swap order if you want).
-    """
-    return (os.getenv("CR29_NORTH_IMAGE_URL", "").strip()
-            or os.getenv("CR29_SOUTH_IMAGE_URL", "").strip())
 
 
 def load_state() -> dict:
@@ -133,8 +160,11 @@ def load_state() -> dict:
     except Exception:
         return default
 
-    for k, v in default.items():
-        data.setdefault(k, v)
+    data.setdefault("seen_ids", [])
+    data.setdefault("posted_guids", [])
+    data.setdefault("posted_text_hashes", [])
+    data.setdefault("cooldowns", {})
+    data.setdefault("global_last_post_ts", 0)
     return data
 
 
@@ -153,13 +183,12 @@ def save_state(state: dict) -> None:
 
 
 # ----------------------------
-# ATOM (regional alert feed) helpers
+# ATOM helpers
 # ----------------------------
 ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
 
 
 def _parse_atom_dt(s: str) -> dt.datetime:
-    # Example: 2025-12-30T23:43:20Z
     if not s:
         return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
@@ -218,7 +247,6 @@ def fetch_atom_entries(
 
 
 def atom_title_for_tay(title: str) -> str:
-    """Replace forecast-region wording with Tay Township wording for public posts."""
     if not title:
         return title
     t = title.replace(", Midland - Coldwater - Orr Lake", f" ({DISPLAY_AREA_NAME})")
@@ -234,9 +262,8 @@ def build_social_text_from_atom(entry: Dict[str, Any]) -> str:
     title = atom_title_for_tay((entry.get("title") or "").strip())
     issued = (entry.get("summary") or "").strip()
 
-    emoji = severity_emoji(title)
-
-    parts = [f"{emoji} {title}"]
+    sev = severity_emoji(title)
+    parts = [f"{sev} {title}"]
     if issued:
         parts.append(issued)
     parts.append(f"More: {MORE_INFO_URL}")
@@ -262,6 +289,7 @@ def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
 # ----------------------------
 # RSS helpers
 # ----------------------------
+
 def ensure_rss_exists() -> None:
     if os.path.exists(RSS_PATH):
         return
@@ -326,6 +354,7 @@ MAX_RSS_ITEMS = 25
 # ----------------------------
 # Cooldown logic
 # ----------------------------
+
 def group_key_for_cooldown(area_name: str, kind: str) -> str:
     raw = f"{normalize(area_name)}|{normalize(kind)}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
@@ -358,8 +387,133 @@ def mark_posted(state: Dict[str, Any], area_name: str, kind: str = "alert") -> N
 
 
 # ----------------------------
-# X (OAuth 2.0) helpers
+# Ontario 511 camera resolver
 # ----------------------------
+
+_ON511_CAMERAS_CACHE: Optional[List[Dict[str, Any]]] = None
+
+
+def is_image_url(url: str) -> bool:
+    """Does URL respond with Content-Type image/*?"""
+    url = (url or "").strip()
+    if not url:
+        return False
+
+    try:
+        r = requests.head(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
+        ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if r.status_code < 400 and ct.startswith("image/"):
+            return True
+    except Exception:
+        pass
+
+    try:
+        r = requests.get(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 20))
+        ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return r.status_code < 400 and ct.startswith("image/")
+    except Exception:
+        return False
+
+
+def fetch_on511_cameras() -> List[Dict[str, Any]]:
+    global _ON511_CAMERAS_CACHE
+    if _ON511_CAMERAS_CACHE is not None:
+        return _ON511_CAMERAS_CACHE
+
+    r = requests.get(ON511_CAMERAS_API, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list):
+        raise RuntimeError("Unexpected 511 cameras payload (expected list).")
+
+    _ON511_CAMERAS_CACHE = data
+    return data
+
+
+def resolve_on511_views_by_keyword(keyword: str) -> List[Dict[str, Any]]:
+    kw = normalize(keyword)
+    cams = fetch_on511_cameras()
+    out: List[Dict[str, Any]] = []
+
+    for cam in cams:
+        name = normalize(str(cam.get("Name") or ""))
+        desc = normalize(str(cam.get("Description") or ""))
+        if kw and (kw in name or kw in desc):
+            views = cam.get("Views") or []
+            if isinstance(views, list):
+                for v in views:
+                    if isinstance(v, dict):
+                        out.append(v)
+
+    return out
+
+
+def pick_north_south_view_urls(views: List[Dict[str, Any]]) -> Tuple[str, str]:
+    north = ""
+    south = ""
+
+    def normalize_url(u: str) -> str:
+        u = (u or "").strip()
+        if not u:
+            return ""
+        if not u.lower().startswith("http"):
+            u = "https://511on.ca" + (u if u.startswith("/") else "/" + u)
+        return u
+
+    for v in views:
+        d = normalize(str(v.get("Description") or ""))
+        u = normalize_url(v.get("Url") or "")
+        if not u:
+            continue
+        if ("north" in d or "nb" in d) and not north:
+            north = u
+        if ("south" in d or "sb" in d) and not south:
+            south = u
+
+    if not north or not south:
+        urls: List[str] = []
+        for v in views:
+            u = normalize_url(v.get("Url") or "")
+            if u:
+                urls.append(u)
+        if not north and len(urls) >= 1:
+            north = urls[0]
+        if not south and len(urls) >= 2:
+            south = urls[1]
+
+    return north, south
+
+
+def resolve_cr29_image_urls() -> List[str]:
+    """Resolve up to two image URLs (north, south) with fallbacks."""
+    north_env = (os.getenv("CR29_NORTH_IMAGE_URL") or "").strip()
+    south_env = (os.getenv("CR29_SOUTH_IMAGE_URL") or "").strip()
+
+    urls: List[str] = []
+
+    for u in [north_env, south_env]:
+        if u and is_image_url(u) and u not in urls:
+            urls.append(u)
+
+    if len(urls) >= 2:
+        return urls[:2]
+
+    try:
+        views = resolve_on511_views_by_keyword(ON511_CAMERA_KEYWORD)
+        north_api, south_api = pick_north_south_view_urls(views)
+        for u in [north_api, south_api]:
+            if u and is_image_url(u) and u not in urls:
+                urls.append(u)
+    except Exception as e:
+        print(f"⚠️ 511 camera API resolver skipped: {e}")
+
+    return urls[:2]
+
+
+# ----------------------------
+# X OAuth2 (posting) helpers
+# ----------------------------
+
 def write_rotated_refresh_token(new_refresh: str) -> None:
     new_refresh = (new_refresh or "").strip()
     if not new_refresh:
@@ -387,12 +541,13 @@ def get_oauth2_access_token() -> str:
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": USER_AGENT,
     }
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }
 
-    r = requests.post("https://api.x.com/2/oauth2/token", headers=headers, data=data, timeout=30)
+    r = requests.post(
+        "https://api.x.com/2/oauth2/token",
+        headers=headers,
+        data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+        timeout=30,
+    )
     print("X token refresh status:", r.status_code)
     r.raise_for_status()
 
@@ -409,16 +564,16 @@ def get_oauth2_access_token() -> str:
     return access
 
 
+# ----------------------------
+# X media upload helpers (OAuth 1.0a)
+# ----------------------------
+
 def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
-    """
-    Downloads an image and returns (bytes, mime_type).
-    Verifies Content-Type starts with image/.
-    """
     image_url = (image_url or "").strip()
     if not image_url:
         raise RuntimeError("No image_url provided")
 
-    r = requests.get(image_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
+    r = requests.get(image_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30), allow_redirects=True)
     r.raise_for_status()
 
     content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -429,10 +584,6 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
 
 
 def x_upload_media(image_url: str) -> str:
-    """
-    Uploads image to X/Twitter v1.1 media endpoint using OAuth 1.0a user context.
-    Returns media_id_string.
-    """
     api_key = os.getenv("X_API_KEY", "").strip()
     api_secret = os.getenv("X_API_SECRET", "").strip()
     access_token = os.getenv("X_ACCESS_TOKEN", "").strip()
@@ -467,16 +618,22 @@ def x_upload_media(image_url: str) -> str:
     return media_id
 
 
-def post_to_x(text: str, image_url: str = "") -> Dict[str, Any]:
+def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, Any]:
     url = "https://api.x.com/2/tweets"
     access_token = get_oauth2_access_token()
 
-    payload = {"text": text}
+    payload: Dict[str, Any] = {"text": text}
 
-    image_url = (image_url or "").strip()
-    if image_url:
-        media_id = x_upload_media(image_url)
-        payload["media"] = {"media_ids": [media_id]}
+    image_urls = [u for u in (image_urls or []) if (u or "").strip()]
+    if image_urls:
+        media_ids: List[str] = []
+        for u in image_urls[:4]:
+            try:
+                media_ids.append(x_upload_media(u))
+            except Exception as e:
+                print(f"⚠️ X media skipped for one image: {e}")
+        if media_ids:
+            payload["media"] = {"media_ids": media_ids}
 
     r = requests.post(
         url,
@@ -510,12 +667,26 @@ def post_to_x(text: str, image_url: str = "") -> Dict[str, Any]:
 # ----------------------------
 # Facebook Page posting helpers
 # ----------------------------
-def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
+
+def post_to_facebook_page(message: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
     page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
     if not page_id or not page_token:
         raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
 
+    url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
+    r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
+    print("FB POST /feed status:", r.status_code)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Facebook feed post failed {r.status_code}")
+    return r.json()
+
+
+def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
+    page_id = os.getenv("FB_PAGE_ID", "").strip()
+    page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
+    if not page_id or not page_token:
+        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
     if not image_url:
         raise RuntimeError("Missing image_url for FB photo post")
 
@@ -523,7 +694,7 @@ def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
     r = requests.post(
         url,
         data={
-            "url": image_url,  # FB fetches this image itself
+            "url": image_url,
             "caption": caption,
             "access_token": page_token,
         },
@@ -531,60 +702,72 @@ def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
     )
     print("FB POST /photos status:", r.status_code)
     if r.status_code >= 400:
-        try:
-            print("FB error body:", r.text)
-        except Exception:
-            pass
         raise RuntimeError(f"Facebook photo post failed {r.status_code}")
+    return r.json()
+
+
+def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[str, Any]:
+    """Posts up to 10 images as a single carousel post."""
+    image_urls = [u for u in (image_urls or []) if (u or "").strip()]
+
+    if not image_urls:
+        return post_to_facebook_page(caption)
+
+    if len(image_urls) == 1:
+        return post_photo_to_facebook_page(caption, image_urls[0])
+
+    page_id = os.getenv("FB_PAGE_ID", "").strip()
+    page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
+    if not page_id or not page_token:
+        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
+
+    media_fbids: List[str] = []
+
+    for u in image_urls[:10]:
+        try:
+            url = f"https://graph.facebook.com/v24.0/{page_id}/photos"
+            r = requests.post(
+                url,
+                data={
+                    "url": u,
+                    "published": "false",
+                    "access_token": page_token,
+                },
+                timeout=30,
+            )
+            if r.status_code >= 400:
+                print(f"⚠️ FB carousel upload failed for one image: {r.status_code}")
+                continue
+            j = r.json()
+            fbid = j.get("id")
+            if fbid:
+                media_fbids.append(str(fbid))
+        except Exception as e:
+            print(f"⚠️ FB carousel upload skipped for one image: {e}")
+
+    if not media_fbids:
+        return post_to_facebook_page(caption)
+
+    if len(media_fbids) == 1:
+        return post_photo_to_facebook_page(caption, image_urls[0])
+
+    data: Dict[str, Any] = {"message": caption, "access_token": page_token}
+    for i, fbid in enumerate(media_fbids):
+        data[f"attached_media[{i}]"] = json.dumps({"media_fbid": fbid})
+
+    feed_url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
+    r = requests.post(feed_url, data=data, timeout=30)
+    print("FB POST /feed (carousel) status:", r.status_code)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Facebook carousel post failed {r.status_code}")
 
     return r.json()
 
 
 # ----------------------------
-# TEST_JSON mode
-# ----------------------------
-def run_test_json() -> None:
-    """
-    Prints a single JSON object that confirms:
-      - ATOM feed fetch works
-      - we can build a social text
-      - CR29 image URL resolves to an actual image and we can download it
-    No posting occurs.
-    """
-    out: Dict[str, Any] = {
-        "atom_feed": ALERT_FEED_URL,
-        "more_info_url": MORE_INFO_URL,
-        "cr29_image_url": get_cr29_image_url(),
-    }
-
-    # Feed test
-    try:
-        entries = fetch_atom_entries(ALERT_FEED_URL)
-        out["atom_entries"] = len(entries)
-        if entries:
-            out["latest_title"] = entries[0].get("title", "")
-            out["latest_social_text"] = build_social_text_from_atom(entries[0])
-    except Exception as e:
-        out["atom_error"] = str(e)
-
-    # Image test
-    img_url = get_cr29_image_url()
-    if img_url:
-        try:
-            img_bytes, ctype = download_image_bytes(img_url)
-            out["image_ok"] = True
-            out["image_content_type"] = ctype
-            out["image_size_bytes"] = len(img_bytes)
-        except Exception as e:
-            out["image_ok"] = False
-            out["image_error"] = str(e)
-
-    print(json.dumps(out, indent=2))
-
-
-# ----------------------------
 # Main
 # ----------------------------
+
 def main() -> None:
     # Clean up any previous rotated token file
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
@@ -593,20 +776,14 @@ def main() -> None:
         except Exception:
             pass
 
-    if TEST_JSON:
-        run_test_json()
-        return
+    camera_image_urls = resolve_cr29_image_urls()
 
     if TEST_TWEET:
         text = "Test post from Tay weather bot ✅"
-        image_url = get_cr29_image_url()
-
         if ENABLE_X_POSTING:
-            post_to_x(text, image_url=image_url)
-
-        if ENABLE_FB_POSTING and image_url:
-            post_photo_to_facebook_page(text, image_url)
-
+            post_to_x(text, image_urls=camera_image_urls)
+        if ENABLE_FB_POSTING:
+            post_carousel_to_facebook_page(text, camera_image_urls)
         return
 
     state = load_state()
@@ -619,23 +796,18 @@ def main() -> None:
     social_posted = 0
     social_skipped_cooldown = 0
 
-    # Fetch regional ATOM alert feed
     try:
         atom_entries = fetch_atom_entries(ALERT_FEED_URL)
     except Exception as e:
-        # Non-fatal: Weather Canada can time out or throttle occasionally.
         print(f"⚠️ ATOM feed unavailable: {e}")
         print("Exiting cleanly; will retry on next scheduled run.")
         return
-
-    image_url = get_cr29_image_url()
 
     for entry in atom_entries:
         guid = atom_entry_guid(entry)
         if not guid:
             continue
 
-        # RSS item
         title = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
         pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
         pub_date = email.utils.format_datetime(pub_dt)
@@ -646,7 +818,6 @@ def main() -> None:
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
             new_rss_items += 1
 
-        # Social posting (dedupe + cooldown)
         if guid in posted:
             continue
 
@@ -664,13 +835,14 @@ def main() -> None:
             posted.add(guid)
             continue
 
+
         print("Social preview:", social_text.replace("\n", " "))
 
         posted_anywhere = False
 
         if ENABLE_X_POSTING:
             try:
-                post_to_x(social_text, image_url=image_url)
+                post_to_x(social_text, image_urls=camera_image_urls)
                 posted_anywhere = True
             except RuntimeError as e:
                 if str(e) == "X_DUPLICATE_TWEET":
@@ -678,9 +850,9 @@ def main() -> None:
                 else:
                     raise
 
-        if ENABLE_FB_POSTING and image_url:
+        if ENABLE_FB_POSTING:
             try:
-                post_photo_to_facebook_page(social_text, image_url)
+                post_carousel_to_facebook_page(social_text, camera_image_urls)
                 posted_anywhere = True
             except RuntimeError as e:
                 print(f"Facebook skipped: {e}")
@@ -693,14 +865,12 @@ def main() -> None:
         else:
             print("No social posts sent for this alert.")
 
-    # Update lastBuildDate
     lbd = channel.find("lastBuildDate")
     if lbd is None:
         lbd = ET.SubElement(channel, "lastBuildDate")
     lbd.text = email.utils.format_datetime(now_utc())
 
     trim_rss_items(channel, MAX_RSS_ITEMS)
-
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
 
     state["posted_guids"] = list(posted)
