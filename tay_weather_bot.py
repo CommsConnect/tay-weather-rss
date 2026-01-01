@@ -440,31 +440,35 @@ def post_to_x(text: str) -> Dict[str, Any]:
 # ----------------------------
 # Facebook Page posting helpers
 # ----------------------------
-def post_to_facebook_page(message: str) -> Dict[str, Any]:
+def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
     page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
+    if not page_id or not page_token:
+        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
 
-    missing = [k for k, v in [
-        ("FB_PAGE_ID", page_id),
-        ("FB_PAGE_ACCESS_TOKEN", page_token),
-    ] if not v]
-    if missing:
-        raise RuntimeError(f"Missing required FB env vars: {', '.join(missing)}")
+    if not image_url:
+        raise RuntimeError("Missing image_url for FB photo post")
 
-    url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
+    url = f"https://graph.facebook.com/v24.0/{page_id}/photos"
     r = requests.post(
         url,
-        data={"message": message, "access_token": page_token},
+        data={
+            "url": image_url,          # FB fetches this image itself
+            "caption": caption,
+            "access_token": page_token,
+        },
         timeout=30,
     )
-
-    print("FB POST /feed status:", r.status_code)
-
+    print("FB POST /photos status:", r.status_code)
     if r.status_code >= 400:
-        print("FB error body:", r.text)  # 👈 THIS is the key line
-        raise RuntimeError(f"Facebook post failed {r.status_code}")
+        try:
+            print("FB error body:", r.text)
+        except Exception:
+            pass
+        raise RuntimeError(f"Facebook photo post failed {r.status_code}")
 
     return r.json()
+
 
 # ----------------------------
 # Main
