@@ -446,7 +446,7 @@ def x_upload_media(image_url: str) -> str:
     img_bytes, mime_type = download_image_bytes(image_url)
 
     auth = OAuth1(api_key, api_secret, access_token, access_secret)
-    upload_url = "https://upload.x.com/1.1/media/upload.json"
+    upload_url = "https://upload.twitter.com/1.1/media/upload.json"
 
     files = {"media": ("image", img_bytes, mime_type)}
     r = requests.post(upload_url, auth=auth, files=files, timeout=60)
@@ -546,7 +546,7 @@ def main() -> None:
         except Exception:
             pass
 
-     if TEST_TWEET:
+    if TEST_TWEET:
         text = "Test post from Tay weather bot ✅"
 
         cr29_north = os.getenv("CR29_NORTH_IMAGE_URL", "").strip()
