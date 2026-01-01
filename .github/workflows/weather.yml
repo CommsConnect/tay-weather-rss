@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      test_tweet:
+        description: "Post a test update (bypasses alert feed + cooldown/dedupe)"
+        required: false
+        default: "false"
 
 concurrency:
   group: tay-weather-rss
@@ -33,6 +38,54 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Sanity check config (non-secret)
+        run: |
+          echo "ENABLE_X_POSTING=${ENABLE_X_POSTING}"
+          echo "ENABLE_FB_POSTING=${ENABLE_FB_POSTING}"
+          echo "TEST_TWEET=${TEST_TWEET}"
+          echo "CR29_NORTH_IMAGE_URL=${CR29_NORTH_IMAGE_URL}"
+          echo "CR29_SOUTH_IMAGE_URL=${CR29_SOUTH_IMAGE_URL}"
+        env:
+          ENABLE_X_POSTING: "true"
+          ENABLE_FB_POSTING: "true"
+          TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
+          CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
+          CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
+
+      - name: Sanity check required secrets (fails fast)
+        run: |
+          missing=0
+
+          # X OAuth2 (posting)
+          for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+          done
+
+          # X OAuth1 (media)
+          for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+          done
+
+          # Facebook
+          for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo "One or more required secrets are missing. Fix repo secrets and re-run."
+            exit 1
+          fi
+        env:
+          X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
+          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+          X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+
       - name: Run weather bot (RSS + socials)
         env:
           ALERT_FEED_URL: "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
@@ -57,9 +110,9 @@ jobs:
           CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
           CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
 
+
           # Toggles
-          TEST_TWEET: "false"
-          TEST_JSON: "false"
+          TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
           ENABLE_X_POSTING: "true"
           ENABLE_FB_POSTING: "true"
 
