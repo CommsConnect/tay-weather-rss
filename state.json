@@ -1,23 +1,25 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101021532",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251230234320",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231182159",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231095952",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101021532",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231182159",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101104437",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101070706",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101104437"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101114449",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20251230234320"
   ],
   "posted_text_hashes": [
-    "78222dfcd113641e37a7dc19bf4c4245fa3e9f00",
+    "5165cfef29881e9fdeae1a995769334a0396d73a",
+    "3578519b87b34ea1dc5838994dd3724cc5e52536",
     "d522ade658f8db2ed6f4b5fdbc06c6d097638a6b",
+    "78222dfcd113641e37a7dc19bf4c4245fa3e9f00",
     "fe4fed3b24e8c069edbd73623a249b47d519265c",
     "cafa86a08a5a25c8e0257d8be178527e7453576e",
-    "3578519b87b34ea1dc5838994dd3724cc5e52536",
-    "5165cfef29881e9fdeae1a995769334a0396d73a"
+    "09bed06a6ec6556d656a8c97142f5e8d44792137"
   ],
   "cooldowns": {
-    "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767264378
+    "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767275232
   },
-  "global_last_post_ts": 1767264378
+  "global_last_post_ts": 1767275232
 }
