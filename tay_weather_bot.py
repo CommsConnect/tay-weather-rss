@@ -284,18 +284,30 @@ def build_social_text_from_atom(entry: Dict[str, Any]) -> str:
     # Pull first “timing” sentence out so it can be its own line (no WHAT/WHEN labels)
     timing = ""
 
-    # Prefer splitting by lines first (EC summaries often use line breaks),
-    # then do a light sentence split that won't break p.m./a.m. as badly.
-    sentences: List[str] = []
-    for line in summary.splitlines():
+    # Prefer splitting by lines first (EC summaries often use line breaks)
+    chunks: List[str] = []
+
+    # Protect a.m./p.m. so we don’t split inside them
+    protected = re.sub(
+        r"\b([ap])\.m\.\b",
+        lambda m: f"{m.group(1).upper()}M_TOKEN",
+        summary,
+        flags=re.I,
+)
+
+    for line in protected.splitlines():
         line = line.strip()
         if not line:
             continue
 
-        parts = re.split(r"(?<!\b[ap])\.(?:\s+|$)", line, flags=re.I)
-        sentences.extend([p.strip() for p in parts if p.strip()])
+    # Split into sentences on periods, then restore a.m./p.m.
+    parts = [p.strip() for p in line.split(".") if p.strip()]
+    for p in parts:
+        p = p.replace("AM_TOKEN", "a.m.").replace("PM_TOKEN", "p.m.")
+        chunks.append(p)
 
-    sentences = chunks
+sentences = chunks
+
 
 
     keep: List[str] = []
