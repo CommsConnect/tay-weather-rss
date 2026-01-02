@@ -51,6 +51,7 @@ jobs:
           TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
           CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
           CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
+          TAY_ALERTS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
 
       - name: Sanity check required secrets (fails fast)
         run: |
