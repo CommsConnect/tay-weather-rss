@@ -304,7 +304,6 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
                 "december": "Dec",
             }
             mon = mon_map.get(mon_name.strip().lower(), mon_name[:3].title())
-            # 12-hour already, remove leading zero by int conversion
             issued_short = f"Issued {mon} {day} {hh}:{mm}{'a' if ap=='am' else 'p'}"
 
     # Find the first narrative block after the separator "* * *"
@@ -312,7 +311,6 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     narrative = ""
     parts = re.split(r"\n\*\s*\*\s*\*\s*\n", text)
     if len(parts) >= 2:
-        # narrative begins immediately after separator
         narrative = parts[1].strip()
     else:
         # fallback: find first occurrence of "What:" and take a window before it
@@ -329,22 +327,39 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     if before_what.strip():
         lines = [ln.strip() for ln in before_what.splitlines() if ln.strip()]
 
-        # Drop known EC UI / navigation junk lines
-        JUNK_HEADLINES = {
-            "alert.", "alerts.", "alert", "alerts",
-            "edit my profile", "my weather profile",
-            "edit my profilemy weather profile",
-        }
+        def looks_like_ui(line: str) -> bool:
+            l = normalize(line)
+            if not l:
+                return True
 
-        while lines and any(junk in lines[0].lower() for junk in JUNK_HEADLINES):
-            lines = lines[1:]
+            # Generic label-y lines
+            if l in {"alert", "alerts", "alert.", "alerts.", "warning", "warnings"}:
+                return True
 
-        headline = (lines[0] if lines else "").strip()
+            # Common EC/UI/nav fragments that sometimes leak into the HTML-to-text output
+            bad_phrases = [
+                "edit my profile",
+                "my weather profile",
+                "français",
+                "sign in",
+                "weather information",
+                "search",
+                "skip to main content",
+            ]
+            if any(p in l for p in bad_phrases):
+                return True
 
-    # Ensure punctuation
-    if headline and not headline.endswith("."):
-        headline += "."
+            # Very short single-token lines are usually header/nav junk
+            if len(l) < 8 and " " not in l:
+                return True
 
+            return False
+
+        # Pick the first non-UI line as the headline
+        for ln in lines:
+            if not looks_like_ui(ln):
+                headline = ln
+                break
 
     # Ensure punctuation
     if headline and not headline.endswith("."):
@@ -381,6 +396,14 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
             if not s.endswith("."):
                 s += "."
             what_lines.append(s)
+
+    # Defensive: remove any UI label sentences if they show up
+    what_lines = [
+        w for w in what_lines
+        if normalize(w) not in {"alert", "alerts", "alert.", "alerts."}
+        and "edit my profile" not in normalize(w)
+        and "my weather profile" not in normalize(w)
+    ]
 
     # When line: first sentence only
     when_line = ""
@@ -430,7 +453,6 @@ def build_x_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
     # Prefer 2 What lines
     chosen_what = [w for w in what_lines if w][:X_WHAT_MAX]
 
-    # Compose candidate blocks in order of preference
     def compose(include_when: bool, include_care: bool, what_count: int) -> str:
         lines = list(base_lines)
         if what_count > 0:
@@ -449,7 +471,7 @@ def build_x_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
         if issued_short:
             lines.append(issued_short)
         lines.append(HASHTAGS)
-        # remove empty lines caused by optional parts
+
         cleaned = []
         for ln in lines:
             ln = (ln or "").rstrip()
@@ -458,7 +480,6 @@ def build_x_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
             cleaned.append(ln)
         return "\n".join(cleaned).strip()
 
-    # Try best -> progressively shorter
     candidates = [
         compose(include_when=True, include_care=True, what_count=2),
         compose(include_when=False, include_care=True, what_count=2),
@@ -476,7 +497,6 @@ def build_x_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
     if len(t) <= 280:
         return t
 
-    # preserve last line hashtags
     lines = t.splitlines()
     if not lines:
         return t[:280]
@@ -496,7 +516,6 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
     when_line = (details.get("when_line") or "").strip()
     issued_short = (details.get("issued_short") or "").strip()
 
-    # Warmer, a bit longer, still no Oxford commas
     care = (
         "If you can, please stay off the roads and give crews room to work. "
         "If you must go out, slow down, leave extra space and keep your lights on. "
@@ -514,7 +533,6 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
 
     if when_line:
         lines.append("")
-        # Facebook: include ONLY what comes after "When:" from EC
         lines.append(when_line.strip())
 
     lines.append("")
@@ -525,7 +543,6 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
         lines.append(issued_short)
     lines.append(HASHTAGS)
 
-    # clean double blanks
     cleaned = []
     for ln in lines:
         ln = (ln or "").rstrip()
