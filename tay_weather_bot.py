@@ -270,9 +270,8 @@ def build_social_text_from_atom(entry: Dict[str, Any]) -> str:
     # Conversational opener, but keep the official event wording in the body
     event_for_header = re.sub(r"\bWarning\b|\bWatch\b|\bAdvisory\b", "conditions", title, flags=re.I).strip()
     header = f"{circle} {event_for_header}"
-
     if "tay township" not in header.lower():
-    header = f"{circle} {event_for_header} in Tay Township"
+        header = f"{circle} {event_for_header} in Tay Township"
 
     # ----------------------------
     # 2) Use Weather Canada phrasing from summary, but avoid duplicated issued/timing lines
