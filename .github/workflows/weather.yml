@@ -45,6 +45,7 @@ jobs:
           echo "TEST_TWEET=${TEST_TWEET}"
           echo "CR29_NORTH_IMAGE_URL=${CR29_NORTH_IMAGE_URL}"
           echo "CR29_SOUTH_IMAGE_URL=${CR29_SOUTH_IMAGE_URL}"
+          echo "TAY_ALERTS_URL=${TAY_ALERTS_URL}"
         env:
           ENABLE_X_POSTING: "true"
           ENABLE_FB_POSTING: "true"
@@ -52,6 +53,7 @@ jobs:
           CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
           CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
           TAY_ALERTS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
+          
 
       - name: Sanity check required secrets (fails fast)
         run: |
