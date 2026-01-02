@@ -65,12 +65,15 @@ ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
 
 USER_AGENT = "tay-weather-rss-bot/1.1"
 
-# Public “more info” URL (Tay coords format)
+# Public “more info” URL
+# Prefer your GitHub Pages Tay page (tay/index.html), fall back to WeatherCAN coords page
 TAY_COORDS_URL = os.getenv(
     "TAY_COORDS_URL",
     "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
 ).strip()
-MORE_INFO_URL = TAY_COORDS_URL
+
+TAY_ALERTS_URL = os.getenv("TAY_ALERTS_URL", "").strip()  # e.g. https://<your-pages-site>/tay/
+MORE_INFO_URL = TAY_ALERTS_URL or TAY_COORDS_URL
 
 ALERT_FEED_URL = os.getenv("ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml").strip()
 DISPLAY_AREA_NAME = "Tay Township area"
@@ -78,23 +81,6 @@ DISPLAY_AREA_NAME = "Tay Township area"
 # Ontario 511 cameras API
 ON511_CAMERAS_API = "https://511on.ca/api/v2/get/cameras"
 ON511_CAMERA_KEYWORD = os.getenv("ON511_CAMERA_KEYWORD", "CR-29").strip() or "CR-29"
-
-
-# ----------------------------
-# Severity emoji
-# ----------------------------
-
-def severity_emoji(title: str) -> str:
-    """Advisory=🟡, Watch=🟠, Warning=🔴, other=⚪"""
-    t = (title or "").lower()
-    if "warning" in t:
-        return "🔴"
-    if "watch" in t:
-        return "🟠"
-    if "advisory" in t:
-        return "🟡"
-    return "⚪"
-
 
 # ----------------------------
 # Cooldown policy
@@ -259,19 +245,102 @@ def atom_entry_guid(entry: Dict[str, Any]) -> str:
 
 
 def build_social_text_from_atom(entry: Dict[str, Any]) -> str:
-    title = atom_title_for_tay((entry.get("title") or "").strip())
-    issued = (entry.get("summary") or "").strip()
+    title_raw = (entry.get("title") or "").strip()
+    summary_raw = (entry.get("summary") or "").strip()
 
-    sev = severity_emoji(title)
-    parts = [f"{sev} {title}"]
-    if issued:
-        parts.append(issued)
-    parts.append(f"More: {MORE_INFO_URL}")
+    # ----------------------------
+    # 1) Colour circle from EC colour-coded prefix (YELLOW/ORANGE/RED)
+    # ----------------------------
+    t_low = title_raw.lower()
+    if t_low.startswith("red "):
+        circle = "🔴"
+    elif t_low.startswith("orange "):
+        circle = "🟠"
+    else:
+        circle = "🟡"
+
+    # Remove ONLY the colour word, keep Weather Canada event wording (Warning/Watch/Advisory)
+    title = re.sub(r"^(yellow|orange|red)\s+", "", title_raw, flags=re.I).strip()
+
+    # Replace forecast-region wording with Tay Township (no parentheses, no “area”)
+    title = title.replace(", Midland - Coldwater - Orr Lake", " in Tay Township")
+    title = title.replace("Midland - Coldwater - Orr Lake", "Tay Township")
+
+    
+    # Conversational opener, but keep the official event wording in the body
+    event_for_header = re.sub(r"\bWarning\b|\bWatch\b|\bAdvisory\b", "conditions", title, flags=re.I).strip()
+    header = f"{circle} {event_for_header}"
+
+    if "tay township" not in header.lower():
+    header = f"{circle} {event_for_header} in Tay Township"
+
+    # ----------------------------
+    # 2) Use Weather Canada phrasing from summary, but avoid duplicated issued/timing lines
+    # ----------------------------
+    summary = summary_raw
+
+    # Remove any leading "Issued at ..." line if present
+    summary = re.sub(r"^\s*issued\s+at.*?(\n+|$)", "", summary, flags=re.I)
+
+    # Pull first “timing” sentence out so it can be its own line (no WHAT/WHEN labels)
+    timing = ""
+    sentences = [s.strip() for s in re.split(r"\.(\s+|$)", summary) if s and s.strip() and s.strip() != " "]
+    # Rebuild sentence list correctly (re.split above keeps separators sometimes); do a simpler split:
+    sentences = [s.strip() for s in summary.split(".") if s.strip()]
+
+    keep: List[str] = []
+    for s in sentences:
+        s_low = s.lower()
+        if not timing and (
+            "conditions are expected" in s_low
+            or "expected" in s_low
+            or "this evening" in s_low
+            or "tonight" in s_low
+            or "today" in s_low
+            or "overnight" in s_low
+            or "into" in s_low and ("morning" in s_low or "afternoon" in s_low or "evening" in s_low)
+        ):
+            timing = s.strip()
+            continue
+        keep.append(s.strip())
+
+    # Keep the first 2–3 sentences for impacts so it stays social-friendly
+    impacts = ". ".join(keep[:3]).strip()
+    if impacts and not impacts.endswith("."):
+        impacts += "."
+
+    if timing and not timing.endswith("."):
+        timing += "."
+
+    # ----------------------------
+    # 3) Issued time at the end (Canadian style, no Oxford commas)
+    # ----------------------------
+    issued_dt = entry.get("updated_dt")
+    issued_str = ""
+    if isinstance(issued_dt, dt.datetime):
+        # Example: "Issued Jan 1, 6:58 p.m."
+        issued_str = issued_dt.strftime("Issued %b %-d, %-I:%M %p")
+        issued_str = issued_str.replace("AM", "a.m.").replace("PM", "p.m.")
+
+    care = "Please take care, avoid unnecessary travel and check on neighbours who may need support."
+
+    parts = [header, ""]
+    if impacts:
+        parts.append(impacts)
+    if timing:
+        parts.extend(["", timing])
+    parts.extend(["", care, "", f"More information: {MORE_INFO_URL}"])
+    if issued_str:
+        parts.extend(["", issued_str])
     parts.append("#TayTownship #ONStorm")
 
-    text = " | ".join([p for p in parts if p])
-    return text if len(text) <= 280 else (text[:277].rstrip() + "…")
+    text = "\n".join([p for p in parts if p]).strip()
 
+    # X hard limit
+    if len(text) > 280:
+        text = text[:277].rstrip() + "…"
+
+    return text
 
 def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
     title = atom_title_for_tay((entry.get("title") or "").strip())
