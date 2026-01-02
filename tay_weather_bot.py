@@ -329,11 +329,22 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     if before_what.strip():
         lines = [ln.strip() for ln in before_what.splitlines() if ln.strip()]
 
-        # Some EC pages include a standalone label line like "Alert." or "Alerts." — skip it
-        while lines and lines[0].strip().lower() in {"alert.", "alerts.", "alert", "alerts"}:
+        # Drop known EC UI / navigation junk lines
+        JUNK_HEADLINES = {
+            "alert.", "alerts.", "alert", "alerts",
+            "edit my profile", "my weather profile",
+            "edit my profilemy weather profile",
+        }
+
+        while lines and any(junk in lines[0].lower() for junk in JUNK_HEADLINES):
             lines = lines[1:]
 
         headline = (lines[0] if lines else "").strip()
+
+    # Ensure punctuation
+    if headline and not headline.endswith("."):
+        headline += "."
+
 
     # Ensure punctuation
     if headline and not headline.endswith("."):
