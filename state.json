@@ -1,13 +1,7 @@
 {
   "seen_ids": [],
-  "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260102024423"
-  ],
-  "posted_text_hashes": [
-    "c23881a7c0d99d6c9bc45c492b08d936c82dd87a"
-  ],
-  "cooldowns": {
-    "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767326639
-  },
-  "global_last_post_ts": 1767326639
+  "posted_guids": [],
+  "posted_text_hashes": [],
+  "cooldowns": {},
+  "global_last_post_ts": 0
 }
