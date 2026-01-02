@@ -307,7 +307,6 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
             issued_short = f"Issued {mon} {day} {hh}:{mm}{'a' if ap=='am' else 'p'}"
 
     # Find the first narrative block after the separator "* * *"
-    # In practice, the page has a literal "* * *" line before the narrative.
     narrative = ""
     parts = re.split(r"\n\*\s*\*\s*\*\s*\n", text)
     if len(parts) >= 2:
@@ -316,7 +315,7 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
         # fallback: find first occurrence of "What:" and take a window before it
         idx = text.lower().find("what:")
         if idx != -1:
-            narrative = text[idx - 400 : idx + 1200]
+            narrative = text[max(0, idx - 400) : idx + 1200]
 
     # Headline = first sentence up to "What:" (or first meaningful line)
     headline = ""
@@ -327,39 +326,24 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     if before_what.strip():
         lines = [ln.strip() for ln in before_what.splitlines() if ln.strip()]
 
-        def looks_like_ui(line: str) -> bool:
-            l = normalize(line)
-            if not l:
+        def looks_like_fragment(line: str) -> bool:
+            line = (line or "").strip()
+            if not line:
                 return True
-
-            # Generic label-y lines
-            if l in {"alert", "alerts", "alert.", "alerts.", "warning", "warnings"}:
+            # Reject fragments like "formation."
+            if len(line.split()) < 4:
                 return True
-
-            # Common EC/UI/nav fragments that sometimes leak into the HTML-to-text output
-            bad_phrases = [
-                "edit my profile",
-                "my weather profile",
-                "français",
-                "sign in",
-                "weather information",
-                "search",
-                "skip to main content",
-            ]
-            if any(p in l for p in bad_phrases):
+            if not line[0].isupper():
                 return True
-
-            # Very short single-token lines are usually header/nav junk
-            if len(l) < 8 and " " not in l:
+            if len(line) < 20:
                 return True
-
             return False
 
-        # Pick the first non-UI line as the headline
         for ln in lines:
-            if not looks_like_ui(ln):
-                headline = ln
-                break
+            if looks_like_fragment(ln):
+                continue
+            headline = ln
+            break
 
     # Ensure punctuation
     if headline and not headline.endswith("."):
