@@ -7,8 +7,11 @@
       Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas.
     </description>
     <language>en-ca</language>
-    <lastBuildDate>Fri, 02 Jan 2026 02:33:52 +0000</lastBuildDate>
-  <item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101235826</guid><pubDate>Thu, 01 Jan 2026 23:58:26 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
+    <lastBuildDate>Fri, 02 Jan 2026 03:51:56 +0000</lastBuildDate>
+  <item><title>YELLOW WARNING - SNOW SQUALL, Midland - Coldwater - Orr Lake</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260102024423</guid><pubDate>Fri, 02 Jan 2026 02:44:23 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL, Midland - Coldwater - Orr Lake
+Issued: 9:44 PM EST Thursday 1 January 2026
+More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101235826</guid><pubDate>Thu, 01 Jan 2026 23:58:26 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
 Issued: 6:58 PM EST Thursday 1 January 2026
 More info (Tay Township): https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260101171209</guid><pubDate>Thu, 01 Jan 2026 17:12:09 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
