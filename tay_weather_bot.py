@@ -277,7 +277,11 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     issued_short = ""
     if issued_raw:
         # Parse like: "6:58 PM EST Thursday 1 January 2026"
-        m2 = re.search(r"(\d{1,2}):(\d{2})\s*(AM|PM)\s*EST\s+\w+\s+(\d{1,2})\s+(\w+)\s+(\d{4})", issued_raw, flags=re.I)
+        m2 = re.search(
+            r"(\d{1,2}):(\d{2})\s*(AM|PM)\s*EST\s+\w+\s+(\d{1,2})\s+(\w+)\s+(\d{4})",
+            issued_raw,
+            flags=re.I,
+        )
         if m2:
             hh = int(m2.group(1))
             mm = m2.group(2)
@@ -286,8 +290,18 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
             mon_name = m2.group(5)
             # map month name to short
             mon_map = {
-                "january":"Jan","february":"Feb","march":"Mar","april":"Apr","may":"May","june":"Jun",
-                "july":"Jul","august":"Aug","september":"Sep","october":"Oct","november":"Nov","december":"Dec",
+                "january": "Jan",
+                "february": "Feb",
+                "march": "Mar",
+                "april": "Apr",
+                "may": "May",
+                "june": "Jun",
+                "july": "Jul",
+                "august": "Aug",
+                "september": "Sep",
+                "october": "Oct",
+                "november": "Nov",
+                "december": "Dec",
             }
             mon = mon_map.get(mon_name.strip().lower(), mon_name[:3].title())
             # 12-hour already, remove leading zero by int conversion
@@ -306,12 +320,19 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
         if idx != -1:
             narrative = text[idx - 400 : idx + 1200]
 
-    # Headline = first sentence up to "What:" (or first line)
+    # Headline = first sentence up to "What:" (or first meaningful line)
     headline = ""
     before_what = narrative
     if "What:" in before_what:
         before_what = before_what.split("What:", 1)[0]
-    headline = before_what.strip().splitlines()[0].strip() if before_what.strip() else ""
+
+    if before_what.strip():
+        lines = [ln.strip() for ln in before_what.splitlines() if ln.strip()]
+        # Some EC pages include a standalone "Alert." line — skip it
+        if lines and lines[0].lower() == "alert.":
+            lines = lines[1:]
+        headline = (lines[0] if lines else "").strip()
+
     # Ensure punctuation
     if headline and not headline.endswith("."):
         headline += "."
@@ -335,7 +356,12 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
         what_block = re.sub(r"\s+", " ", what_block).strip()
 
         # Protect a.m./p.m. from splitting
-        protected = re.sub(r"\b([ap])\.m\.\b", lambda m: f"{m.group(1).upper()}M_TOKEN", what_block, flags=re.I)
+        protected = re.sub(
+            r"\b([ap])\.m\.\b",
+            lambda m: f"{m.group(1).upper()}M_TOKEN",
+            what_block,
+            flags=re.I,
+        )
         raw_sents = [s.strip() for s in protected.split(".") if s.strip()]
         for s in raw_sents:
             s = s.replace("AM_TOKEN", "a.m.").replace("PM_TOKEN", "p.m.")
@@ -348,7 +374,12 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     if when_block:
         when_block = when_block.split("Additional information:", 1)[0]
         when_block = re.sub(r"\s+", " ", when_block).strip()
-        protected = re.sub(r"\b([ap])\.m\.\b", lambda m: f"{m.group(1).upper()}M_TOKEN", when_block, flags=re.I)
+        protected = re.sub(
+            r"\b([ap])\.m\.\b",
+            lambda m: f"{m.group(1).upper()}M_TOKEN",
+            when_block,
+            flags=re.I,
+        )
         sents = [s.strip() for s in protected.split(".") if s.strip()]
         if sents:
             s = sents[0].replace("AM_TOKEN", "a.m.").replace("PM_TOKEN", "p.m.")
@@ -470,7 +501,8 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
 
     if when_line:
         lines.append("")
-        lines.append(f"When: {when_line}".replace("When: When:", "When:").strip())
+        # Facebook: include ONLY what comes after "When:" from EC
+        lines.append(when_line.strip())
 
     lines.append("")
     lines.append(care)
