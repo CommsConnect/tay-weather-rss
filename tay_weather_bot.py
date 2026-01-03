@@ -49,6 +49,7 @@ from PIL import Image
 from io import BytesIO
 import facebook_poster as fb
 from requests_oauthlib import OAuth1
+from pathlib import Path
 
 
 # ----------------------------
