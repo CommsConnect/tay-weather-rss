@@ -24,6 +24,29 @@ The workflow passes these (and the script has safe defaults):
 - `ENABLE_X_POSTING` (`true`/`false`)
 - `ENABLE_FB_POSTING` (`true`/`false`)
 
+### Content + media (editable)
+
+This repo includes an Excel workbook you can edit to change:
+- *Care statements* that are randomly (but deterministically) selected by **alert color + type**
+- *Media rules* to choose a preloaded graphic vs. Ontario 511 cameras
+- Optional *custom one-off advisory text*
+
+File: `content_config.xlsx` (commit changes to take effect).
+
+Local images can live in `media/` and be referenced in the workbook (e.g., `media/wind.png`).
+
+### Optional: Telegram GO/NO-GO approval
+
+If enabled, the bot will send a preview to Telegram and wait for you to tap **GO** before it posts to X/Facebook.
+
+Repo variables:
+- `ENABLE_TELEGRAM_APPROVAL` (`true`/`false`)
+- `ENABLE_X_POSTING`, `ENABLE_FB_POSTING` (defaults are `false` unless you set these)
+
+Repo secrets:
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
 ## Required GitHub Secrets
 
 ### X (OAuth2 refresh flow)
@@ -47,3 +70,16 @@ The workflow passes these (and the script has safe defaults):
 - `tay-weather.xml` — generated RSS output (committed by Actions)
 - `state.json` — dedupe/cooldown state (committed by Actions)
 - `.github/workflows/weather.yml` — scheduled workflow
+
+
+## Online private config + media (Google)
+
+Set GitHub Secrets:
+- GOOGLE_SERVICE_ACCOUNT_JSON
+- GOOGLE_SHEET_ID
+- GOOGLE_DRIVE_FOLDER_ID (optional, for Drive media)
+
+Optional env:
+- CONTENT_CONFIG_SOURCE=auto|google|local (default auto)
+
+In Google Sheet tabs CareStatements / MediaRules / CustomText, set MediaRules.media_kind to `drive` and media_ref to a filename in the shared Drive folder (or `id:<fileId>`).
