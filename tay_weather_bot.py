@@ -178,8 +178,8 @@ def safe_int(x: Any, default: int) -> int:
 # Alert parsing + content config
 # ----------------------------
 
-def _level_and_color(title: str) -> Tuple[str, str]:
-    """Returns (level, color). color is a friendly label (yellow/orange/red/grey)."""
+def _level_and_colour(title: str) -> Tuple[str, str]:
+    """Returns (level, colour). colour is a friendly label (yellow/orange/red/grey)."""
     t = (title or "").lower()
     if "warning" in t:
         return "warning", "red"
@@ -213,7 +213,7 @@ _TYPE_KEYWORDS = [
 
 def alert_meta_from_title(title: str) -> Dict[str, str]:
     """Extracts coarse metadata used for care statements + media rules."""
-    level, color = _level_and_color(title)
+    level, colour = _level_and_colour(title)
     t = normalize(title)
 
     # Try to extract the phrase immediately preceding the level word
@@ -234,7 +234,7 @@ def alert_meta_from_title(title: str) -> Dict[str, str]:
 
     return {
         "level": level,
-        "color": color,
+        "colour": colour,
         "type": type_key,
         "type_phrase": type_phrase or "general",
     }
@@ -257,7 +257,7 @@ def _weighted_choice(rows: List[Dict[str, Any]], seed: str) -> Optional[Dict[str
         w = safe_int(r.get("weight", 1), 1)
         # Prefer more-specific rows over wildcard rows
         specificity = 0
-        for k in ("color", "level", "type"):
+        for k in ("colour", "level", "type"):
             v = normalize(str(r.get(k, "")))
             if v and v != "*":
                 specificity += 1
@@ -433,9 +433,9 @@ def pick_care_statement(cfg: Dict[str, Any], meta: Dict[str, str], seed: str) ->
     rows = cfg.get("care") or []
     matched: List[Dict[str, Any]] = []
     for r in rows:
-        if _matches(str(r.get("color", "*")), meta.get("color", "")) and _matches(str(r.get("level", "*")), meta.get("level", "")) and _matches(str(r.get("type", "*")), meta.get("type", "")):
+        if _matches(str(r.get("colour", "*")), meta.get("colour", "")) and _matches(str(r.get("level", "*")), meta.get("level", "")) and _matches(str(r.get("type", "*")), meta.get("type", "")):
             matched.append({
-                "color": r.get("color"),
+                "colour": r.get("colour"),
                 "level": r.get("level"),
                 "type": r.get("type"),
                 "weight": r.get("weight", 1),
@@ -450,12 +450,12 @@ def pick_media_refs(cfg: Dict[str, Any], meta: Dict[str, str], seed: str) -> Lis
     rows = cfg.get("media") or []
     matched: List[Dict[str, Any]] = []
     for r in rows:
-        if _matches(str(r.get("color", "*")), meta.get("color", "")) and _matches(str(r.get("level", "*")), meta.get("level", "")) and _matches(str(r.get("type", "*")), meta.get("type", "")):
+        if _matches(str(r.get("colour", "*")), meta.get("colour", "")) and _matches(str(r.get("level", "*")), meta.get("level", "")) and _matches(str(r.get("type", "*")), meta.get("type", "")):
             kind = normalize(str(r.get("media_kind") or "")) or "local"
             ref = (r.get("media_ref") or "").strip()
             if ref:
                 matched.append({
-                    "color": r.get("color"),
+                    "colour": r.get("colour"),
                     "level": r.get("level"),
                     "type": r.get("type"),
                     "weight": r.get("weight", 1),
