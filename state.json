@@ -1,10 +1,13 @@
 {
-  "seen_keys": [],
+  "last_event_name": "Snow Squall",
   "last_fb_post_ts": 0,
-  "last_x_post_ts": 0,
-  "last_report_url": "https://weather.gc.ca/warnings/report_e.html?onrm94",
+  "last_fb_text_hash": "7d5b69a40f0e6e0a95df01f26baa3256d3f9845aae662cec6039b1b27aad0138",
   "last_hash": "",
   "last_issue_time_text": "3:55 AM local Sat 3 Jan 2026",
-  "last_event_name": "Snow Squall",
-  "last_run_utc": "2026-01-03T03:55:31Z"
+  "last_report_url": "https://weather.gc.ca/warnings/report_e.html?onrm94",
+  "last_run_utc": "2026-01-03T03:55:31Z",
+  "last_social_post_utc": "2026-01-03T04:54:27.492859Z",
+  "last_x_post_ts": 0,
+  "last_x_text_hash": "1eeda20344928efd7703cc68f1377d410f795844c6b997f95fced3c59a2d514e",
+  "seen_keys": []
 }
