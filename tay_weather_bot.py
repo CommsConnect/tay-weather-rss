@@ -1,17 +1,13 @@
 # tay_weather_bot.py
 #
-# Tay Township Weather Bot (v2.3 - robust EC JSON-from-view-source parser + X 403 soft-fail)
+# Tay Township Weather Bot (v2.2)
 # - Uses Environment Canada ATOM feed as the alert list (source of truth)
-# - For each entry, fetches the EC HTML alert page and extracts (from embedded JSON in page source):
-#     * headline (first paragraph in embedded alert text)
-#     * What lines (X up to 2, Facebook up to 3)
-#     * When line (first sentence)
-#     * care_text (from "Additional information:" / "Care:" / "Preparedness:" when present)
-#   Also extracts issued time (short) from page text (as before).
+# - For each entry, fetches the EC HTML alert page and extracts from *page-source JSON*:
+#     * issueTimeText -> issued_short
+#     * "text" -> headline, What, When
 # - Posts to X + Facebook (optional toggles)
 # - X: hard 280 chars including spaces
-# - Facebook: includes fuller care statement (prefers EC care_text when available)
-# - IMPORTANT: headline line 1 always ends with "in Tay Township."
+# - Facebook: includes fuller care statement
 #
 import base64
 import datetime as dt
@@ -48,7 +44,7 @@ WATERMARK_ON511 = os.getenv("WATERMARK_ON511", "true").lower() == "true"
 ON511_LOGO_PATH = os.getenv("ON511_LOGO_PATH", "assets/On511_logo.png").strip()
 WATERMARK_OPACITY = float(os.getenv("WATERMARK_OPACITY", "0.35"))  # 0..1
 
-USER_AGENT = "tay-weather-rss-bot/2.3"
+USER_AGENT = "tay-weather-rss-bot/2.2"
 
 # Public “more info” URL (prefer GitHub page)
 TAY_COORDS_URL = os.getenv(
@@ -280,10 +276,8 @@ def clean_atom_event_name(title_raw: str) -> str:
     t = t.replace(", Midland - Coldwater - Orr Lake", "").strip()
     t = t.replace("Midland - Coldwater - Orr Lake", "").strip()
 
-    # Remove EC-style prefixes like "WARNING -", "WATCH -", "ADVISORY -"
     t = re.sub(r"^(warning|watch|advisory|statement)\s*-\s*", "", t, flags=re.I).strip()
 
-    # Title-case only if it looks SHOUTY
     if t.isupper():
         t = t.title()
 
@@ -291,9 +285,10 @@ def clean_atom_event_name(title_raw: str) -> str:
 
 
 # ----------------------------
-# EC parsing helpers
+# EC parsing helpers (page-source JSON first)
 # ----------------------------
 def _html_to_text(html: str) -> str:
+    """Fallback: naive html -> text."""
     if not html:
         return ""
     html = re.sub(r"(?i)<br\s*/?>", "\n", html)
@@ -310,174 +305,166 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
-def _extract_ec_embedded_text_from_page_source(html: str) -> str:
+def _extract_json_string_value(html: str, key: str) -> str:
     """
-    Robustly extract the *alert narrative* from EC page source.
-
-    The page includes many UI "text":"..." fields. We find *all* occurrences of:
-      "text":"...","confidence":
-    decode each candidate, then pick the one that contains "What:" or "When:".
+    Find a JSON string value for a key like "text":"...."
+    Returns decoded string, or "" if not found.
     """
-    if not html:
+    if not html or not key:
         return ""
 
-    for m in re.finditer(
-        r'"text"\s*:\s*"(?P<raw>.*?)"\s*,\s*"confidence"\s*:',
-        html,
-        flags=re.DOTALL,
-    ):
-        raw = m.group("raw")
-        try:
-            decoded = json.loads(f'"{raw}"')
-        except Exception:
-            decoded = raw.replace(r"\n", "\n").replace(r"\\", "\\")
+    needle = f'"{key}":"'
+    start = html.find(needle)
+    if start == -1:
+        return ""
 
-        decoded = (decoded or "").strip()
-        if not decoded:
+    i = start + len(needle)
+    out_chars: List[str] = []
+    escaped = False
+
+    while i < len(html):
+        ch = html[i]
+        if escaped:
+            out_chars.append("\\" + ch)
+            escaped = False
+            i += 1
             continue
 
-        if ("What:" in decoded) or ("When:" in decoded) or ("\n\nWhat:" in decoded):
-            return decoded
+        if ch == "\\":
+            escaped = True
+            i += 1
+            continue
+
+        if ch == '"':
+            raw_escaped = "".join(out_chars)
+            try:
+                return json.loads(f'"{raw_escaped}"')
+            except Exception:
+                return ""
+        else:
+            out_chars.append(ch)
+            i += 1
 
     return ""
 
 
-def _first_sentence(text: str) -> str:
-    if not text:
-        return ""
-    t = re.sub(r"\s+", " ", text).strip()
-
-    protected = re.sub(
-        r"\b([ap])\.m\.\b",
-        lambda m: f"{m.group(1).upper()}M_TOKEN",
-        t,
-        flags=re.I,
-    )
-    sents = [s.strip() for s in protected.split(".") if s.strip()]
-    if not sents:
-        return ""
-    s = sents[0].replace("AM_TOKEN", "a.m.").replace("PM_TOKEN", "p.m.")
-    if not s.endswith("."):
-        s += "."
-    return s
-
-
-def _sentences(text: str) -> List[str]:
-    if not text:
-        return []
-    t = re.sub(r"\s+", " ", text).strip()
-
-    protected = re.sub(
-        r"\b([ap])\.m\.\b",
-        lambda m: f"{m.group(1).upper()}M_TOKEN",
-        t,
-        flags=re.I,
-    )
-    raw_sents = [s.strip() for s in protected.split(".") if s.strip()]
-    out: List[str] = []
-    for s in raw_sents:
-        s = s.replace("AM_TOKEN", "a.m.").replace("PM_TOKEN", "p.m.")
-        if not s.endswith("."):
-            s += "."
-        out.append(s)
-    return out
-
-
-def _parse_ec_alert_text_sections(alert_text: str) -> Dict[str, Any]:
+def _issued_short_from_issue_time_text(issue_time_text: str) -> Tuple[str, str]:
     """
-    Parse the EC embedded alert text into sections.
+    issue_time_text example:
+      "6:41 p.m. EST Friday 2 January 2026"
+    returns (issued_raw, issued_short)
+    """
+    issued_raw = (issue_time_text or "").strip()
+    if not issued_raw:
+        return "", ""
 
-    Expected structure:
-      Headline paragraph
+    issued_short = ""
+    m = re.search(
+        r"(\d{1,2}):(\d{2})\s*(a\.m\.|p\.m\.)\s*EST\s+\w+\s+(\d{1,2})\s+(\w+)\s+(\d{4})",
+        issued_raw,
+        flags=re.I,
+    )
+    if m:
+        hh = int(m.group(1))
+        mm = m.group(2)
+        ap = m.group(3).lower()
+        day = int(m.group(4))
+        mon_name = m.group(5)
+
+        mon_map = {
+            "january": "Jan", "february": "Feb", "march": "Mar", "april": "Apr",
+            "may": "May", "june": "Jun", "july": "Jul", "august": "Aug",
+            "september": "Sep", "october": "Oct", "november": "Nov", "december": "Dec",
+        }
+        mon = mon_map.get(mon_name.strip().lower(), mon_name[:3].title())
+        issued_short = f"Issued {mon} {day} {hh}:{mm}{'a' if 'a.m.' in ap else 'p'}"
+
+    return issued_raw, issued_short
+
+
+def _parse_alert_text_blocks(alert_text: str) -> Dict[str, Any]:
+    """
+    Parse EC alert narrative text (from JSON "text"):
+
+      Snow squalls continue tonight.
 
       What:
       ...
-
       When:
       ...
-
-      Additional information:
+      Where:
       ...
     """
-    out: Dict[str, Any] = {
-        "headline": "",
-        "what_text": "",
-        "when_text": "",
-        "care_text": "",
-        "what_lines": [],
-        "when_line": "",
-    }
-
     if not alert_text:
-        return out
+        return {"headline": "", "what_lines": [], "when_line": ""}
 
-    blocks = [b.strip() for b in alert_text.strip().split("\n\n") if b.strip()]
-    if not blocks:
-        return out
+    t = alert_text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
-    out["headline"] = blocks[0].strip()
+    headline = ""
+    what_lines: List[str] = []
+    when_line = ""
 
-    current: Optional[str] = None
-    buf: List[str] = []
+    if "What:" in t:
+        before_what, after_what = t.split("What:", 1)
+        headline_raw = before_what.strip()
 
-    def flush() -> None:
-        nonlocal current, buf
-        if not current:
-            buf = []
-            return
-        joined = "\n\n".join(buf).strip()
-        if current == "what":
-            out["what_text"] = joined
-        elif current == "when":
-            out["when_text"] = joined
-        elif current == "care":
-            out["care_text"] = joined
-        buf = []
+        # headline: first non-empty line (EC usually puts the key sentence first)
+        head_line = ""
+        for ln in headline_raw.split("\n"):
+            ln = ln.strip()
+            if ln:
+                head_line = ln
+                break
+        if head_line:
+            headline = head_line if head_line.endswith(".") else head_line + "."
 
-    for b in blocks[1:]:
-        if b.startswith("What:"):
-            flush()
-            current = "what"
-            buf.append(b[len("What:") :].strip())
-            continue
-        if b.startswith("When:"):
-            flush()
-            current = "when"
-            buf.append(b[len("When:") :].strip())
-            continue
-        if b.startswith("Care:"):
-            flush()
-            current = "care"
-            buf.append(b[len("Care:") :].strip())
-            continue
-        if b.startswith("Preparedness:"):
-            flush()
-            current = "care"
-            buf.append(b[len("Preparedness:") :].strip())
-            continue
-        if b.startswith("Additional information:"):
-            flush()
-            current = "care"
-            buf.append(b[len("Additional information:") :].strip())
-            continue
+        # What block ends at When:
+        if "When:" in after_what:
+            what_part, after_when = after_what.split("When:", 1)
+            when_part = after_when
+        else:
+            what_part, when_part = after_what, ""
 
-        if current:
-            buf.append(b)
+        # Collect What lines as non-empty lines, skipping section headers
+        skip = {"what:", "when:", "where:", "additional information:", "additional info:"}
+        for ln in what_part.split("\n"):
+            ln = ln.strip()
+            if not ln:
+                continue
+            if ln.lower() in skip:
+                continue
+            what_lines.append(ln)
 
-    flush()
+        # When line: first meaningful line after When:
+        when_part = when_part.strip()
+        if when_part:
+            for ln in when_part.split("\n"):
+                ln = ln.strip()
+                if not ln:
+                    continue
+                if ln.lower() in skip:
+                    continue
+                when_line = ln if ln.endswith(".") else ln + "."
+                break
+    else:
+        # No What/When structure — just take first non-empty line as headline
+        for ln in t.split("\n"):
+            ln = ln.strip()
+            if ln:
+                headline = ln if ln.endswith(".") else ln + "."
+                break
 
-    out["what_lines"] = _sentences(out.get("what_text", "")) if out.get("what_text") else []
-    out["when_line"] = _first_sentence(out.get("when_text", "")) if out.get("when_text") else ""
-    return out
+    return {"headline": headline, "what_lines": what_lines, "when_line": when_line}
 
 
 def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     """
-    Updated EC parser:
-    - Fetch EC alert HTML
-    - Extract embedded JSON "text" field (View Source), robustly selecting the real alert narrative
-    - Parse headline/what/when/care from that narrative
-    - Keep issued_short extraction (regex over page text) for footer line
+    Preferred:
+      - Parse from embedded JSON in the HTML (same content visible in "view page source")
+        * "text" contains narrative with What/When
+        * "issueTimeText" contains issued timestamp
+    Fallback:
+      - crude HTML-to-text (should still not crash; may return empty What/When)
     """
     if not url:
         return {}
@@ -486,70 +473,35 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     r.raise_for_status()
     html = r.text
 
-    # Issued line from page text (as before)
-    text_for_issued = _html_to_text(html)
+    # JSON-first
+    alert_text = _extract_json_string_value(html, "text")
+    issue_time_text = _extract_json_string_value(html, "issueTimeText")
 
-    issued_raw = ""
-    m = re.search(
-        r"\b(\d{1,2}:\d{2}\s*(?:AM|PM)\s*EST\s+\w+\s+\d{1,2}\s+\w+\s+\d{4})\b",
-        text_for_issued,
-        flags=re.I,
-    )
-    if m:
-        issued_raw = m.group(1).strip()
+    # fallback if missing
+    if not alert_text:
+        alert_text = _html_to_text(html)
 
-    issued_short = ""
-    if issued_raw:
-        m2 = re.search(
-            r"(\d{1,2}):(\d{2})\s*(AM|PM)\s*EST\s+\w+\s+(\d{1,2})\s+(\w+)\s+(\d{4})",
-            issued_raw,
+    blocks = _parse_alert_text_blocks(alert_text)
+
+    issued_raw, issued_short = _issued_short_from_issue_time_text(issue_time_text)
+
+    # very last resort issued regex (only if issueTimeText missing)
+    if not issued_raw:
+        txt = _html_to_text(html)
+        m = re.search(
+            r"\b(\d{1,2}:\d{2}\s*(?:a\.m\.|p\.m\.)\s*EST\s+\w+\s+\d{1,2}\s+\w+\s+\d{4})\b",
+            txt,
             flags=re.I,
         )
-        if m2:
-            hh = int(m2.group(1))
-            mm = m2.group(2)
-            ap = m2.group(3).lower()
-            day = int(m2.group(4))
-            mon_name = m2.group(5)
-
-            mon_map = {
-                "january": "Jan",
-                "february": "Feb",
-                "march": "Mar",
-                "april": "Apr",
-                "may": "May",
-                "june": "Jun",
-                "july": "Jul",
-                "august": "Aug",
-                "september": "Sep",
-                "october": "Oct",
-                "november": "Nov",
-                "december": "Dec",
-            }
-            mon = mon_map.get(mon_name.strip().lower(), mon_name[:3].title())
-            issued_short = f"Issued {mon} {day} {hh}:{mm}{'a' if ap=='am' else 'p'}"
-
-    embedded_text = _extract_ec_embedded_text_from_page_source(html)
-
-    if not embedded_text:
-        return {
-            "issued_raw": issued_raw,
-            "issued_short": issued_short,
-            "headline": "",
-            "what_lines": [],
-            "when_line": "",
-            "care_text": "",
-        }
-
-    parsed = _parse_ec_alert_text_sections(embedded_text)
+        if m:
+            issued_raw, issued_short = _issued_short_from_issue_time_text(m.group(1))
 
     return {
         "issued_raw": issued_raw,
         "issued_short": issued_short,
-        "headline": (parsed.get("headline") or "").strip(),
-        "what_lines": parsed.get("what_lines") or [],
-        "when_line": (parsed.get("when_line") or "").strip(),
-        "care_text": (parsed.get("care_text") or "").strip(),
+        "headline": blocks["headline"],
+        "what_lines": blocks["what_lines"],
+        "when_line": blocks["when_line"],
     }
 
 
@@ -603,13 +555,13 @@ def build_x_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
 
     candidates = [
         compose(2, True, care_long, True, True),
-        compose(2, True, care_mid, False, True),
-        compose(2, True, care_short, False, True),
-        compose(1, True, care_short, False, True),
-        compose(1, True, "", False, True),
-        compose(1, True, "", False, False),
-        compose(0, True, "", False, False),
-        compose(0, False, "", False, False),
+        compose(2, True, care_mid, False, True),     # drop issued
+        compose(2, True, care_short, False, True),   # shorter care
+        compose(1, True, care_short, False, True),   # drop 2nd what
+        compose(1, True, "", False, True),           # drop care
+        compose(1, True, "", False, False),          # drop hashtags
+        compose(0, True, "", False, False),          # when only
+        compose(0, False, "", False, False),         # absolute minimum
     ]
 
     for t in candidates:
@@ -624,20 +576,17 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
     Facebook:
     - Line 1 must end with "in Tay Township."
     - Include: What (up to 3), When, care, More, Issued, hashtags
-    - Prefers EC care_text if present
     """
     headline = (details.get("headline") or "").strip()
     what_lines = [w.strip() for w in (details.get("what_lines") or []) if (w or "").strip()]
     when_line = (details.get("when_line") or "").strip()
     issued_short = (details.get("issued_short") or "").strip()
 
-    care = (details.get("care_text") or "").strip()
-    if not care:
-        care = (
-            "If you can, please stay off the roads and give crews room to work. "
-            "If you must go out, slow down, leave extra space and keep your lights on. "
-            "Please check on neighbours who may need help staying warm or getting supplies."
-        )
+    care = (
+        "If you can, please stay off the roads and give crews room to work. "
+        "If you must go out, slow down, leave extra space and keep your lights on. "
+        "Please check on neighbours who may need help staying warm or getting supplies."
+    )
 
     if headline:
         h = headline[:-1] if headline.endswith(".") else headline
@@ -934,18 +883,28 @@ def get_oauth2_access_token() -> str:
         data={"grant_type": "refresh_token", "refresh_token": refresh_token},
         timeout=30,
     )
+
     print("X token refresh status:", r.status_code)
-    r.raise_for_status()
+    if r.status_code >= 400:
+        try:
+            print("X token refresh error body:", r.text)
+        except Exception:
+            pass
+        raise RuntimeError("X_TOKEN_REFRESH_FAILED")
 
     payload = r.json()
     access = payload.get("access_token")
     if not access:
-        raise RuntimeError("No access_token returned during refresh.")
+        print("X token refresh missing access_token:", payload)
+        raise RuntimeError("X_TOKEN_REFRESH_FAILED")
 
     new_refresh = payload.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
         print("⚠️ X refresh token rotated. Workflow will update the repo secret.")
         write_rotated_refresh_token(new_refresh)
+
+    if payload.get("scope"):
+        print("X OAuth2 scopes:", payload.get("scope"))
 
     return access
 
@@ -1002,7 +961,7 @@ def x_upload_media(image_url: str) -> str:
 
     print("X media upload status:", r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"X media upload failed {r.status_code}")
+        raise RuntimeError(f"X media upload failed {r.status_code} {r.text}")
 
     j = r.json()
     media_id = j.get("media_id_string") or (str(j.get("media_id")) if j.get("media_id") else "")
@@ -1046,15 +1005,12 @@ def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, An
         detail = ""
         try:
             j = r.json()
-            detail = (j.get("detail") or "")
+            detail = (j.get("detail") or "").lower()
         except Exception:
-            detail = r.text or ""
+            pass
 
-        if r.status_code == 403 and "duplicate" in detail.lower():
+        if r.status_code == 403 and "duplicate" in detail:
             raise RuntimeError("X_DUPLICATE_TWEET")
-
-        if r.status_code == 403 and "not permitted" in detail.lower():
-            raise RuntimeError("X_NOT_PERMITTED")
 
         raise RuntimeError(f"X post failed {r.status_code} {r.text}")
 
@@ -1154,87 +1110,6 @@ def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[
 
 
 # ----------------------------
-# RSS helpers (kept identical to your existing workflow)
-# ----------------------------
-def ensure_rss_exists() -> None:
-    if os.path.exists(RSS_PATH):
-        return
-
-    rss = ET.Element("rss", version="2.0")
-    channel = ET.SubElement(rss, "channel")
-
-    ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
-    ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
-    ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
-    ET.SubElement(channel, "language").text = "en-ca"
-
-    ET.ElementTree(rss).write(RSS_PATH, encoding="utf-8", xml_declaration=True)
-
-
-def load_rss_tree() -> Tuple[ET.ElementTree, ET.Element]:
-    ensure_rss_exists()
-    tree = ET.parse(RSS_PATH)
-    root = tree.getroot()
-    channel = root.find("channel")
-    if channel is None:
-        raise RuntimeError("RSS file missing <channel>")
-    return tree, channel
-
-
-def rss_item_exists(channel: ET.Element, guid_text: str) -> bool:
-    for item in channel.findall("item"):
-        guid = item.find("guid")
-        if guid is not None and (guid.text or "").strip() == guid_text:
-            return True
-    return False
-
-
-def add_rss_item(
-    channel: ET.Element,
-    title: str,
-    link: str,
-    guid: str,
-    pub_date: str,
-    description: str,
-) -> None:
-    item = ET.Element("item")
-    ET.SubElement(item, "title").text = title
-    ET.SubElement(item, "link").text = link
-    g = ET.SubElement(item, "guid")
-    g.text = guid
-    g.set("isPermaLink", "false")
-    ET.SubElement(item, "pubDate").text = pub_date
-    ET.SubElement(item, "description").text = description
-
-    insert_index = 0
-    for i, child in enumerate(list(channel)):
-        if child.tag in {"title", "link", "description", "language", "lastBuildDate"}:
-            insert_index = i + 1
-    channel.insert(insert_index, item)
-
-
-def trim_rss_items(channel: ET.Element, max_items: int) -> None:
-    items = channel.findall("item")
-    if len(items) <= max_items:
-        return
-    for item in items[max_items:]:
-        channel.remove(item)
-
-
-def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
-    title = (entry.get("title") or "").strip()
-    issued = (entry.get("summary") or "").strip()
-    official = (entry.get("link") or "").strip()
-    bits = [title]
-    if issued:
-        bits.append(issued)
-    bits.append(f"More info (Tay Township): {MORE_INFO_URL}")
-    if official:
-        bits.append(f"Official alert details: {official}")
-    return "\n".join(bits)
-
-
-# ----------------------------
 # Main
 # ----------------------------
 def main() -> None:
@@ -1252,13 +1127,13 @@ def main() -> None:
         if ENABLE_X_POSTING:
             try:
                 post_to_x(text, image_urls=camera_image_urls)
-            except RuntimeError as e:
-                print(f"⚠️ X test post skipped: {e}")
+            except Exception as e:
+                print(f"⚠️ X test skipped: {e}")
         if ENABLE_FB_POSTING:
             try:
                 post_carousel_to_facebook_page(text, camera_image_urls)
-            except RuntimeError as e:
-                print(f"⚠️ FB test post skipped: {e}")
+            except Exception as e:
+                print(f"⚠️ FB test skipped: {e}")
         return
 
     state = load_state()
@@ -1298,7 +1173,6 @@ def main() -> None:
         if guid in posted:
             continue
 
-        # Cooldown checks
         allowed, reason = cooldown_allows_post(state, DISPLAY_AREA_NAME, kind="alert")
         if not allowed:
             social_skipped_cooldown += 1
@@ -1336,17 +1210,20 @@ def main() -> None:
             except RuntimeError as e:
                 if str(e) == "X_DUPLICATE_TWEET":
                     print("X rejected duplicate tweet text, skipping.")
-                elif str(e) == "X_NOT_PERMITTED":
-                    print("⚠️ X not permitted (403). Skipping X, continuing with FB/RSS.")
                 else:
-                    print(f"⚠️ X post failed (soft): {e}")
+                    # IMPORTANT: don't crash the run; let FB + RSS still proceed
+                    print(f"⚠️ X skipped: {e}")
+            except Exception as e:
+                print(f"⚠️ X unexpected error, skipped: {e}")
 
         if ENABLE_FB_POSTING:
             try:
                 post_carousel_to_facebook_page(fb_text, camera_image_urls)
                 posted_anywhere = True
             except RuntimeError as e:
-                print(f"Facebook skipped: {e}")
+                print(f"⚠️ Facebook skipped: {e}")
+            except Exception as e:
+                print(f"⚠️ Facebook unexpected error, skipped: {e}")
 
         if posted_anywhere:
             social_posted += 1
