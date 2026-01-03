@@ -45,6 +45,8 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from PIL import Image
+from io import BytesIO
 import facebook_poster as fb
 from requests_oauthlib import OAuth1
 
@@ -569,6 +571,44 @@ def get_oauth2_access_token() -> str:
 # X media upload helpers (OAuth 1.0a)
 # ----------------------------
 
+
+def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
+    """
+    Adds the On511/Tay 'bug' in the lower-right corner for Ontario 511 camera images.
+
+    We only apply this to 511 camera captures (the CR29_NORTH/SOUTH URLs). If anything goes wrong,
+    we return the original bytes so posting still works.
+    """
+    try:
+        # Load base image
+        im = Image.open(BytesIO(image_bytes))
+        im = im.convert("RGBA")
+
+        # Load logo (repo asset)
+        asset_path = Path(__file__).resolve().parent / "assets" / "On511_logo.png"
+        logo = Image.open(asset_path).convert("RGBA")
+
+        # Scale logo relative to image width
+        target_w = max(120, int(im.width * 0.18))
+        scale = target_w / float(logo.width)
+        target_h = max(1, int(logo.height * scale))
+        logo = logo.resize((target_w, target_h))
+
+        # Bottom-right with padding
+        pad = max(8, int(im.width * 0.015))
+        x = max(0, im.width - logo.width - pad)
+        y = max(0, im.height - logo.height - pad)
+
+        im.alpha_composite(logo, (x, y))
+
+        # Encode back to JPEG (camera frames are JPEG; this keeps things compatible for X/FB)
+        out = BytesIO()
+        im = im.convert("RGB")
+        im.save(out, format="JPEG", quality=90, optimize=True)
+        return out.getvalue(), "image/jpeg"
+    except Exception as e:
+        print("⚠️ On511 bug overlay failed; using original image:", e)
+        return image_bytes, mime_type
 def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
     image_url = (image_url or "").strip()
     if not image_url:
@@ -581,7 +621,13 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
     if not content_type.startswith("image/"):
         raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
 
-    return r.content, content_type
+    data = r.content
+
+    # Add bug for Ontario 511 cameras (CR29)
+    if "511on.ca/map/Cctv/" in image_url:
+        data, content_type = apply_on511_bug(data, content_type)
+
+    return data, content_type
 
 
 # Wire Facebook poster image loader (used only if non-URL refs are passed)
