@@ -1154,6 +1154,41 @@ def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, An
 # Facebook Page posting helpers
 # ----------------------------
 
+def _fb_debug_response(r: requests.Response, label: str) -> None:
+    """Print useful debug info for Facebook Graph API failures."""
+    try:
+        print(f"{label} status:", r.status_code)
+    except Exception:
+        pass
+
+    if r.status_code < 400:
+        return
+
+    # Raw body (most useful in Actions logs)
+    try:
+        print("FB error body:", r.text)
+    except Exception:
+        pass
+
+    # Structured error (when JSON)
+    try:
+        j = r.json() or {}
+        err = j.get("error") or {}
+        if err:
+            print(
+                "FB error parsed:",
+                {
+                    "message": err.get("message"),
+                    "type": err.get("type"),
+                    "code": err.get("code"),
+                    "error_subcode": err.get("error_subcode"),
+                    "fbtrace_id": err.get("fbtrace_id"),
+                },
+            )
+    except Exception:
+        pass
+
+
 def post_to_facebook_page(message: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
     page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
@@ -1161,8 +1196,14 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
         raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
 
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
-    r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
-    print("FB POST /feed status:", r.status_code)
+    r = requests.post(
+        url,
+        data={"message": message, "access_token": page_token},
+        headers={"User-Agent": USER_AGENT},
+        timeout=30,
+    )
+
+    _fb_debug_response(r, "FB POST /feed")
     if r.status_code >= 400:
         raise RuntimeError(f"Facebook feed post failed {r.status_code}")
     return r.json()
@@ -1186,6 +1227,7 @@ def post_photo_to_facebook_page(caption: str, image_ref: str) -> Dict[str, Any]:
                 "caption": caption,
                 "access_token": page_token,
             },
+            headers={"User-Agent": USER_AGENT},
             timeout=30,
         )
     else:
@@ -1194,16 +1236,22 @@ def post_photo_to_facebook_page(caption: str, image_ref: str) -> Dict[str, Any]:
             url,
             data={"caption": caption, "access_token": page_token},
             files={"source": ("image", img_bytes, mime_type)},
+            headers={"User-Agent": USER_AGENT},
             timeout=30,
         )
-    print("FB POST /photos status:", r.status_code)
+
+    _fb_debug_response(r, "FB POST /photos")
     if r.status_code >= 400:
         raise RuntimeError(f"Facebook photo post failed {r.status_code}")
     return r.json()
 
 
 def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[str, Any]:
-    """Posts up to 10 images as a single carousel post."""
+    """Posts up to 10 images as a single carousel post.
+    Recommended behaviour:
+      - If carousel build/post fails, fall back to single photo (first image).
+      - If that fails too, fall back to plain text feed post.
+    """
     image_urls = [u for u in (image_urls or []) if (u or "").strip()]
 
     if not image_urls:
@@ -1219,6 +1267,7 @@ def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[
 
     media_fbids: List[str] = []
 
+    # 1) Upload each photo as unpublished to get media IDs
     for u in image_urls[:10]:
         try:
             url = f"https://graph.facebook.com/v24.0/{page_id}/photos"
@@ -1230,6 +1279,7 @@ def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[
                         "published": "false",
                         "access_token": page_token,
                     },
+                    headers={"User-Agent": USER_AGENT},
                     timeout=30,
                 )
             else:
@@ -1241,36 +1291,57 @@ def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[
                         "access_token": page_token,
                     },
                     files={"source": ("image", img_bytes, mime_type)},
+                    headers={"User-Agent": USER_AGENT},
                     timeout=30,
                 )
+
             if r.status_code >= 400:
-                print(f"⚠️ FB carousel upload failed for one image: {r.status_code}")
+                _fb_debug_response(r, "FB carousel upload (one image)")
                 continue
+
             j = r.json()
             fbid = j.get("id")
             if fbid:
                 media_fbids.append(str(fbid))
+
         except Exception as e:
             print(f"⚠️ FB carousel upload skipped for one image: {e}")
 
+    # If we couldn't upload any images, fall back
     if not media_fbids:
+        print("⚠️ FB carousel: no media IDs collected; falling back to text post.")
         return post_to_facebook_page(caption)
 
+    # If we only got one media ID, just do a single photo post
     if len(media_fbids) == 1:
+        print("⚠️ FB carousel: only one media ID; falling back to single photo post.")
         return post_photo_to_facebook_page(caption, image_urls[0])
 
+    # 2) Create the feed post attaching the unpublished media
     data: Dict[str, Any] = {"message": caption, "access_token": page_token}
     for i, fbid in enumerate(media_fbids):
         data[f"attached_media[{i}]"] = json.dumps({"media_fbid": fbid})
 
     feed_url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
-    r = requests.post(feed_url, data=data, timeout=30)
-    print("FB POST /feed (carousel) status:", r.status_code)
+    r = requests.post(
+        feed_url,
+        data=data,
+        headers={"User-Agent": USER_AGENT},
+        timeout=30,
+    )
+
+    _fb_debug_response(r, "FB POST /feed (carousel)")
+
     if r.status_code >= 400:
-        raise RuntimeError(f"Facebook carousel post failed {r.status_code}")
+        # Recommended fallback behaviour (so you still get a post out)
+        print("⚠️ FB carousel post failed; falling back to single photo, then text.")
+        try:
+            return post_photo_to_facebook_page(caption, image_urls[0])
+        except Exception as e:
+            print(f"⚠️ FB fallback single photo failed: {e}")
+            return post_to_facebook_page(caption)
 
     return r.json()
-
 
 # ----------------------------
 # Telegram approval gate (optional)
