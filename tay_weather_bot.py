@@ -852,7 +852,7 @@ def main() -> None:
             post_to_x(f"{base}\n\n(X)", image_urls=camera_image_urls)
 
         if ENABLE_FB_POSTING and TEST_FACEBOOK:
-            fb_state = fb.load_state("state.json")
+            fb_state = load_state()
             fb_result = fb.safe_post_facebook(
                 fb_state,
                 caption=f"{base}\n\n(Facebook)",
