@@ -1,7 +1,7 @@
 {
-  "seen_ids": [],
-  "posted_guids": [],
-  "posted_text_hashes": [],
-  "cooldowns": {},
-  "global_last_post_ts": 0
+  "seen_keys": [],
+  "last_fb_post_ts": 0,
+  "last_x_post_ts": 0,
+  "last_report_url": "",
+  "last_hash": ""
 }
