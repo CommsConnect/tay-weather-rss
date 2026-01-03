@@ -156,6 +156,30 @@ def safe_print(s: str) -> None:
     sys.stdout.write(s + "\n")
     sys.stdout.flush()
 
+def is_no_alert_title(title: str) -> bool:
+    """
+    Battleboard sometimes publishes a placeholder like "No alerts in effect."
+    This is defensive: treat common variants as "no active alerts."
+    """
+    t = re.sub(r"\s+", " ", (title or "")).strip().lower()
+    if not t:
+        return True
+    needles = [
+        "no alerts",
+        "no alert",
+        "no warnings",
+        "no warning",
+        "no watches",
+        "no watch",
+        "no advisories",
+        "no advisory",
+        "no statements",
+        "no statement",
+        "none in effect",
+        "not in effect",
+    ]
+    return any(n in t for n in needles)
+
 
 # ----------------------------
 # Battleboard parsing
@@ -173,17 +197,21 @@ class AlertInfo:
     what_lines: List[str]
     when_line: str
 
-def parse_battleboard_first_entry(feed_xml: str) -> Tuple[str, Optional[dt.datetime], str]:
+def parse_battleboard_first_entry(feed_xml: str) -> Tuple[Optional[str], Optional[dt.datetime], Optional[str]]:
     """
-    Returns (title, issued_dt_local, entry_html_snippet)
+    Returns (title, issued_dt_local, entry_html_snippet).
+
+    If there are no entries, returns (None, None, None).
     """
     root = ET.fromstring(feed_xml)
 
     entry = root.find("atom:entry", ATOM_NS)
     if entry is None:
-        raise RuntimeError("No <entry> found in battleboard feed")
+        return (None, None, None)
 
     title = (entry.findtext("atom:title", default="", namespaces=ATOM_NS) or "").strip()
+    if is_no_alert_title(title):
+        return (None, None, None)
 
     # issued time: prefer <published>, else <updated>
     ts = (entry.findtext("atom:published", default="", namespaces=ATOM_NS) or "").strip()
@@ -210,6 +238,9 @@ def extract_report_url_from_entry_content(entry_content: str) -> str:
     """
     Battleboard entries usually contain an <a href=".../warnings/report_e.html?...">.
     """
+    if not entry_content:
+        raise RuntimeError("Empty entry content; cannot extract report URL")
+
     # Look for report_e.html?onrm94 (or any report_e.html?... token)
     m = re.search(r'href="(https?://weather\.gc\.ca/warnings/report_e\.html\?[^"]+)"', entry_content)
     if m:
@@ -237,18 +268,14 @@ def extract_alert_text_blob_from_report_source(html: str) -> str:
     The report page has embedded JSON with a "text":"...What:\n...\nWhen:\n..." field.
     We pick the first blob that contains 'What:' and 'When:'.
     """
-    # Find many candidates; keep it relatively tight to avoid huge matches.
     candidates = re.findall(r'"text"\s*:\s*"([^"]{20,5000}?)"', html, flags=re.DOTALL)
     for c in candidates:
         if "What:" in c and "When:" in c:
             try:
-                # decode JSON string escapes safely
                 return json.loads('"' + c.replace("\\", "\\\\").replace('"', '\\"') + '"')
             except Exception:
-                # fallback: replace common escapes
                 return c.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").replace('\\"', '"')
 
-    # Some pages store it as text":"... with escaped sequences including \n
     m = re.search(r'"text"\s*:\s*"(.+?)"\s*,\s*"warnings"', html, flags=re.DOTALL)
     if m:
         c = m.group(1)
@@ -263,16 +290,13 @@ def parse_what_when_from_alert_text(alert_text: str) -> Tuple[List[str], str]:
     """
     Parse the text blob and return (what_lines, when_line).
     """
-    # normalise newlines
     t = alert_text.replace("\r\n", "\n").replace("\r", "\n")
 
-    # WHAT: from 'What:' until 'When:' (or end)
     what_block = ""
     m = re.search(r"\bWhat:\s*\n(.+?)\n\s*When:\s*\n", t, flags=re.DOTALL | re.IGNORECASE)
     if m:
         what_block = m.group(1).strip()
     else:
-        # fallback: single-line What:
         m2 = re.search(r"\bWhat:\s*(.+?)\n\s*When:\s*", t, flags=re.DOTALL | re.IGNORECASE)
         if m2:
             what_block = m2.group(1).strip()
@@ -280,7 +304,6 @@ def parse_what_when_from_alert_text(alert_text: str) -> Tuple[List[str], str]:
     what_lines = [ln.strip() for ln in what_block.split("\n") if ln.strip()]
     what_lines = clamp_lines(what_lines, 5)
 
-    # WHEN: from 'When:' until 'Where:' or end
     when_block = ""
     m = re.search(r"\bWhen:\s*\n(.+?)(\n\s*Where:\s*\n|\n\s*Details:\s*\n|$)", t, flags=re.DOTALL | re.IGNORECASE)
     if m:
@@ -290,8 +313,6 @@ def parse_what_when_from_alert_text(alert_text: str) -> Tuple[List[str], str]:
     when_lines = clamp_lines(when_lines, 3)
     when_line = " ".join(when_lines).strip()
 
-    # If "Continuing tonight." and "Weakening..." were split by line breaks,
-    # the join above gives the desired single line sentence group.
     return what_lines, when_line
 
 
@@ -337,7 +358,6 @@ def fetch_camera_image(url: str) -> Optional[bytes]:
     if "image/" in ctype:
         return r.content
 
-    # If it's HTML, try to find the first image URL in it.
     html = r.text
     m = re.search(r'<img[^>]+src="([^"]+)"', html, flags=re.I)
     if m:
@@ -396,7 +416,6 @@ def get_oauth2_access_token() -> str:
     if not access_token:
         raise RuntimeError("No access_token returned from X token refresh")
 
-    # If token rotated, write it for workflow to capture
     new_refresh = payload.get("refresh_token")
     if new_refresh and new_refresh != X_REFRESH_TOKEN:
         safe_print("⚠️ X refresh token rotated. Workflow will update the repo secret.")
@@ -472,6 +491,7 @@ def fb_post_message(message: str) -> Tuple[bool, bool]:
     rate_limited = ("\"code\":368" in body) or ("error_subcode\":1390008" in body)
     return (False, rate_limited)
 
+
 # ----------------------------
 # Message builders
 # ----------------------------
@@ -482,10 +502,7 @@ CARE_FB = ("If you can, please stay off the roads and give crews room to work. "
 
 def build_headline_line(title: str) -> str:
     t = re.sub(r"\s+", " ", title).strip()
-    # Title-case but keep common words
     t = t.title()
-    # Normalise "Snow Squall Warning" etc (title() makes "Squall")
-    # Ensure it includes "Warning/Watch/Advisory/Statement" if present in title already.
     return f"🟡 - {t} in Tay Township"
 
 def build_x_message(alert: AlertInfo) -> str:
@@ -507,11 +524,9 @@ def build_x_message(alert: AlertInfo) -> str:
 
     msg = "\n".join([p for p in parts if p is not None])
 
-    # Enforce 280 chars by progressively trimming
     if len(msg) <= 280:
         return msg
 
-    # drop second what line
     if len(what_lines) > 1:
         what_lines = what_lines[:1]
         parts = [headline, ""] + what_lines
@@ -524,7 +539,6 @@ def build_x_message(alert: AlertInfo) -> str:
         if len(msg) <= 280:
             return msg
 
-    # shorten care line
     short_care = "Please take care, travel only if needed."
     parts = [headline, ""] + what_lines
     if when_line:
@@ -536,7 +550,6 @@ def build_x_message(alert: AlertInfo) -> str:
     if len(msg) <= 280:
         return msg
 
-    # final fallback: remove when line
     parts = [headline, ""] + what_lines + [short_care, "", footer]
     msg = "\n".join(parts)
     return msg[:280]
@@ -570,7 +583,13 @@ def main() -> None:
     feed_xml = fetch_text(ALERT_FEED_URL)
 
     title, issued_local, entry_content = parse_battleboard_first_entry(feed_xml)
-    report_url = extract_report_url_from_entry_content(entry_content)
+
+    # ✅ No active alerts: exit cleanly and do not post
+    if not title:
+        safe_print("✅ No active alerts found in battleboard feed. Nothing to post.")
+        return
+
+    report_url = extract_report_url_from_entry_content(entry_content or "")
 
     # Fetch warnings report page source
     report_html = fetch_text(report_url)
@@ -585,8 +604,6 @@ def main() -> None:
         when_line=when_line,
     )
 
-    # De-dupe key should not change on every run.
-    # Use title + parsed What/When + report_url (and issued if present).
     dedupe_basis = json.dumps(
         {
             "title": title,
@@ -607,7 +624,6 @@ def main() -> None:
     safe_print("\nFB preview:")
     safe_print(fb_text)
 
-    # If already posted this exact alert, stop
     if state.get("last_alert_hash") == alert_hash:
         safe_print("No changes in alert; nothing to post.")
         return
@@ -629,7 +645,6 @@ def main() -> None:
             except Exception as e:
                 safe_print(f"⚠️ X skipped: {e}")
 
-
     # FB post cooldown + spam block handling
     if ENABLE_FB_POSTING:
         cooldown_until = state.get("fb_cooldown_until")
@@ -646,21 +661,19 @@ def main() -> None:
                         state["last_fb_post_ts"] = now_ts()
                         posted_any = True
                     elif rate_limited:
-                        # Code 368 / 1390008 spam protection — back off for 2 hours
                         state["fb_cooldown_until"] = now_ts() + 2 * 60 * 60
                         safe_print("⚠️ Facebook rate limit hit. Backing off for 2 hours.")
                 except Exception as e:
                     safe_print(f"⚠️ Facebook skipped: {e}")
-    
-        # Mark alert as posted only if at least one platform succeeded
-        if posted_any:
-            state["last_alert_hash"] = alert_hash
-            save_state(state)
-            safe_print(f"Social posts sent: {'1+' if posted_any else '0'}")
-        else:
-            # Still save state hash? No — keep so it retries later when cooldown lifts
-            save_state(state)
-            safe_print("No social posts sent for this alert.")
+
+    # ✅ Save hash if ANY platform posted (works even if FB disabled)
+    if posted_any:
+        state["last_alert_hash"] = alert_hash
+        save_state(state)
+        safe_print("Social posts sent: 1+")
+    else:
+        save_state(state)
+        safe_print("No social posts sent for this alert.")
 
 if __name__ == "__main__":
     main()
