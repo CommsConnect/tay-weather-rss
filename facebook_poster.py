@@ -127,8 +127,8 @@ def should_post_to_facebook(
     """
     Prevent overwhelming Facebook:
       - Only post when there's something new (or a deliberate test run)
-      - Respect cooldown between successful posts
-      - Respect a block window if FB rate-limited you recently
+      - Respect a cooldown between successful posts (fb_cooldown_until or derived from fb_last_posted_at)
+      - Respect a block window if FB rate-limited you recently (fb_blocked_until)
     """
     now = now or utc_now()
 
@@ -139,9 +139,17 @@ def should_post_to_facebook(
     if fb_blocked_until and now < fb_blocked_until:
         return FBDecision(False, f"blocked_until_{_iso(fb_blocked_until)}")
 
+    # Prefer explicit cooldown timestamp if present
+    fb_cooldown_until = _parse_iso(str(state.get("fb_cooldown_until", "")))
+    if fb_cooldown_until and now < fb_cooldown_until:
+        return FBDecision(False, f"cooldown_until_{_iso(fb_cooldown_until)}")
+
+    # Back-compat: derive cooldown from last successful post time
     last_ok = _parse_iso(str(state.get("fb_last_posted_at", "")))
-    if last_ok and (now - last_ok).total_seconds() < cooldown_seconds:
-        return FBDecision(False, f"cooldown_{cooldown_seconds}s")
+    if last_ok:
+        derived_until = last_ok + timedelta(seconds=cooldown_seconds)
+        if now < derived_until:
+            return FBDecision(False, f"cooldown_until_{_iso(derived_until)}")
 
     return FBDecision(True, "allowed")
 
@@ -186,18 +194,19 @@ def post_photo_to_facebook_page(caption: str, image_ref: str) -> Dict[str, Any]:
 
     url = f"https://graph.facebook.com/{api_ver}/{page_id}/photos"
 
-    if re.match(r"^https?://", image_ref, flags=re.IGNORECASE):
-        r = _post(url, data={"url": image_ref, "caption": caption, "access_token": page_token})
-    else:
-        img_bytes, mime_type = load_image_bytes(image_ref)
-        r = _post(
-            url,
-            data={"caption": caption, "access_token": page_token},
-            files={"source": ("image", img_bytes, mime_type)},
-        )
+    # Always upload bytes so we can apply local processing (e.g., On511 bug overlay)
+    img_bytes, mime_type = load_image_bytes(image_ref)
+    r = _post(
+        url,
+        data={"caption": caption, "access_token": page_token},
+        files={"source": ("image", img_bytes, mime_type)},
+    )
 
     print("FB POST /photos status:", r.status_code)
-    _raise_for_status(r, "FB /photos")
+    if r.status_code >= 400:
+        print("FB error body:", r.text)
+        raise requests.HTTPError(f"FB /photos failed {r.status_code}", response=r)
+
     return r.json()
 
 
@@ -292,11 +301,16 @@ def safe_post_facebook(
         cooldown_seconds=cooldown_seconds,
     )
     if not decision.ok_to_post:
+        # Persist derived cooldown so the repo state reflects what the bot is doing
+        if decision.reason.startswith("cooldown_until_"):
+            state["fb_cooldown_until"] = decision.reason.replace("cooldown_until_", "")
+            save_state(state, state_path)
         print(f"FB: skipping ({decision.reason})")
         return {"skipped": True, "reason": decision.reason}
 
     def _mark_success(mode: str, result: Dict[str, Any]) -> Dict[str, Any]:
         state["fb_last_posted_at"] = _iso(now)
+        state["fb_cooldown_until"] = _iso(now + timedelta(seconds=cooldown_seconds))
         state.pop("fb_blocked_until", None)
         save_state(state, state_path)
         return {"ok": True, "mode": mode, "result": result}
