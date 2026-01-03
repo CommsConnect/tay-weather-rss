@@ -270,15 +270,22 @@ def clean_atom_event_name(title_raw: str) -> str:
     """
     From ATOM title like:
       "Yellow Snow Squall Warning, Midland - Coldwater - Orr Lake"
-    produce:
-      "Snow Squall Warning"
+      "Yellow WARNING - SNOW SQUALL, Midland - Coldwater - Orr Lake"
+    produce something sane for fallback line1.
     """
     t = (title_raw or "").strip()
     t = re.sub(r"^(yellow|orange|red)\s+", "", t, flags=re.I).strip()
     t = t.replace(", Midland - Coldwater - Orr Lake", "").strip()
     t = t.replace("Midland - Coldwater - Orr Lake", "").strip()
-    return t or "Weather alert"
 
+    # Remove EC-style prefixes like "WARNING -", "WATCH -", "ADVISORY -"
+    t = re.sub(r"^(warning|watch|advisory|statement)\s*-\s*", "", t, flags=re.I).strip()
+
+    # Title-case only if it looks SHOUTY
+    if t.isupper():
+        t = t.title()
+
+    return t or "Weather alert"
 
 # ----------------------------
 # EC HTML parsing helpers
@@ -302,11 +309,12 @@ def _html_to_text(html: str) -> str:
 
 def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     """
-    Robust EC parser:
-    - Prefer parsing only after "* * *" divider (prevents navbar/UI junk)
-    - If divider isn't found, fallback safely to the portion starting near "What:"
-    - Extract:
-        issued_short, headline, what_lines[], when_line
+    EC parser:
+    - Prefer parsing only after "* * *" divider (best signal).
+    - If divider isn't found, FALL BACK to a safe anchor strategy:
+        * find the first "What:" and parse around it
+        * headline = first meaningful sentence immediately before "What:"
+    This keeps us protected from navbar junk but still captures What/When.
     """
     if not url:
         return {}
@@ -356,18 +364,30 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
             mon = mon_map.get(mon_name.strip().lower(), mon_name[:3].title())
             issued_short = f"Issued {mon} {day} {hh}:{mm}{'a' if ap=='am' else 'p'}"
 
-    # Narrative extraction — prefer STRICT divider, fallback near What:
+    # ----------------------------
+    # Narrative extraction
+    # ----------------------------
     narrative = ""
+
+    # Preferred: only after "* * *"
     m_sep = re.search(r"\*\s*\*\s*\*", text)
     if m_sep:
         narrative = text[m_sep.end():].strip()
     else:
-        m_what = re.search(r"\bWhat:\b", text)
-        if m_what:
-            start = max(0, m_what.start() - 500)  # include a bit of context for headline
+        # Fallback: anchor on first "What:"
+        idx = text.find("What:")
+        if idx != -1:
+            # Take a reasonable window around it so we avoid header/menu junk
+            start = max(0, idx - 1200)
             narrative = text[start:].strip()
 
-    if not narrative:
+            # If we cut mid-word, tighten to the nearest previous blank line
+            cut = narrative.find("\n\n")
+            if cut != -1 and cut < 300:
+                narrative = narrative[cut:].strip()
+
+    # If we still have nothing useful, fail cleanly
+    if not narrative or "What:" not in narrative:
         return {
             "issued_raw": issued_raw,
             "issued_short": issued_short,
@@ -377,47 +397,37 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
         }
 
     # Extract What/When blocks
+    after_what = narrative.split("What:", 1)[1]
     what_block = ""
     when_block = ""
-    if "What:" in narrative:
-        after_what = narrative.split("What:", 1)[1]
-        if "When:" in after_what:
-            what_block, after_when = after_what.split("When:", 1)
-            when_block = after_when
-        else:
-            what_block = after_what
 
-    # Headline: first meaningful sentence before "What:"
+    if "When:" in after_what:
+        what_block, after_when = after_what.split("When:", 1)
+        when_block = after_when
+    else:
+        what_block = after_what
+
+    # Headline: first meaningful sentence right before "What:"
+    before_what = narrative.split("What:", 1)[0].strip()
+
     headline = ""
-    before_what = narrative.split("What:", 1)[0] if "What:" in narrative else narrative
+    # collapse whitespace but keep sentence boundaries
+    before_what_clean = re.sub(r"\s+", " ", before_what).strip()
+    # split into sentences
+    raw_head_sents = [s.strip() for s in before_what_clean.split(".") if s.strip()]
 
-    if before_what.strip():
-        lines = [ln.strip() for ln in before_what.splitlines() if ln.strip()]
-
-        def looks_like_fragment(line: str) -> bool:
-            line = (line or "").strip()
-            if not line:
-                return True
-            if len(line.split()) < 4:
-                return True
-            if not line[0].isupper():
-                return True
-            if len(line) < 20:
-                return True
+    def good_headline(s: str) -> bool:
+        if len(s) < 25:
             return False
+        if len(s.split()) < 5:
+            return False
+        return True
 
-        for ln in lines:
-            up = ln.upper()
-            # Skip shouty boilerplate-ish lines
-            if "WARNING" in up or "WATCH" in up or "ADVISORY" in up or "STATEMENT" in up:
-                continue
-            if looks_like_fragment(ln):
-                continue
-            headline = ln
+    # choose the last good sentence before What:
+    for s in reversed(raw_head_sents):
+        if good_headline(s):
+            headline = s + "."
             break
-
-    if headline and not headline.endswith("."):
-        headline += "."
 
     # What lines: split by sentence
     what_lines: List[str] = []
@@ -464,7 +474,6 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
         "what_lines": what_lines,
         "when_line": when_line,
     }
-
 
 # ----------------------------
 # Social text builders
