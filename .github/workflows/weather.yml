@@ -5,10 +5,22 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
-      test_tweet:
-        description: "Post a test update (bypasses alert feed + cooldown/dedupe)"
+      test_x:
+        description: "Post a TEST update to X (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      test_facebook:
+        description: "Post a TEST update to Facebook (bypasses alert feed + cooldown/dedupe)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: tay-weather-rss
@@ -20,7 +32,35 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
+
+    env:
+      # --- Feature toggles ---
+      ENABLE_X_POSTING: true
+      ENABLE_FB_POSTING: true
+
+      # --- Test flags (per platform) ---
+      TEST_X: ${{ github.event.inputs.test_x || 'false' }}
+      TEST_FACEBOOK: ${{ github.event.inputs.test_facebook || 'false' }}
+
+      # Optional backward compatibility (safe to remove later)
+      TEST_TWEET: ${{ github.event.inputs.test_x || 'false' }}
+
+      # --- Feeds & images ---
+      ALERT_FEED_URL: https://weather.gc.ca/rss/battleboard/onrm94_e.xml
+      TAY_COORDS_URL: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
+      TAY_ALERTS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
+      CR29_NORTH_IMAGE_URL: https://511on.ca/map/Cctv/400
+      CR29_SOUTH_IMAGE_URL: https://511on.ca/map/Cctv/402
+
+      # --- Content config ---
+      CONTENT_CONFIG_SOURCE: auto
+      CONTENT_CONFIG_XLSX: content_config.xlsx
+
+      # --- Facebook safety ---
+      FB_COOLDOWN_SECONDS: 3600      # 1 hour between successful FB posts
+      FB_BLOCK_SECONDS: 21600        # 6 hours if rate-limited
+      FB_JITTER_SECONDS: 10          # small randomness to avoid burst detection
 
     steps:
       - name: Check out repo
@@ -40,68 +80,52 @@ jobs:
 
       - name: Sanity check config (non-secret)
         run: |
-          echo "ENABLE_X_POSTING=${ENABLE_X_POSTING}"
-          echo "ENABLE_FB_POSTING=${ENABLE_FB_POSTING}"
-          echo "TEST_TWEET=${TEST_TWEET}"
-          echo "CR29_NORTH_IMAGE_URL=${CR29_NORTH_IMAGE_URL}"
-          echo "CR29_SOUTH_IMAGE_URL=${CR29_SOUTH_IMAGE_URL}"
-          echo "TAY_ALERTS_URL=${TAY_ALERTS_URL}"
-          echo "CONTENT_CONFIG_SOURCE=${CONTENT_CONFIG_SOURCE}"
-          echo "CONTENT_CONFIG_XLSX=${CONTENT_CONFIG_XLSX}"
-          # Don't print Google secret values; just show whether set
-          if [ -n "${GOOGLE_SHEET_ID}" ]; then echo "GOOGLE_SHEET_ID=set"; else echo "GOOGLE_SHEET_ID=missing"; fi
-          if [ -n "${GOOGLE_SERVICE_ACCOUNT_JSON}" ]; then echo "GOOGLE_SERVICE_ACCOUNT_JSON=set"; else echo "GOOGLE_SERVICE_ACCOUNT_JSON=missing"; fi
-          if [ -n "${GOOGLE_DRIVE_FOLDER_ID}" ]; then echo "GOOGLE_DRIVE_FOLDER_ID=set"; else echo "GOOGLE_DRIVE_FOLDER_ID=missing"; fi
+          echo "ENABLE_X_POSTING=$ENABLE_X_POSTING"
+          echo "ENABLE_FB_POSTING=$ENABLE_FB_POSTING"
+          echo "TEST_X=$TEST_X"
+          echo "TEST_FACEBOOK=$TEST_FACEBOOK"
+          echo "TAY_ALERTS_URL=$TAY_ALERTS_URL"
+          echo "CONTENT_CONFIG_SOURCE=$CONTENT_CONFIG_SOURCE"
+          echo "CONTENT_CONFIG_XLSX=$CONTENT_CONFIG_XLSX"
+          if [ -n "$GOOGLE_SHEET_ID" ]; then echo "GOOGLE_SHEET_ID=set"; else echo "GOOGLE_SHEET_ID=missing"; fi
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then echo "GOOGLE_SERVICE_ACCOUNT_JSON=set"; else echo "GOOGLE_SERVICE_ACCOUNT_JSON=missing"; fi
+          if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ]; then echo "GOOGLE_DRIVE_FOLDER_ID=set"; else echo "GOOGLE_DRIVE_FOLDER_ID=missing"; fi
+
+      - name: Verify required secrets
         env:
-          ENABLE_X_POSTING: "true"
-          ENABLE_FB_POSTING: "true"
-          TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
-          CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
-          CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
-          TAY_ALERTS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
-
-          # Content config toggles
-          CONTENT_CONFIG_SOURCE: ${{ vars.CONTENT_CONFIG_SOURCE || 'auto' }}
-          CONTENT_CONFIG_XLSX: ${{ vars.CONTENT_CONFIG_XLSX || 'content_config.xlsx' }}
-
-          # Google (secrets) - safe check only (no printing)
+          X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
+          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+          X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-
-      - name: Sanity check required secrets (fails fast)
         run: |
           missing=0
 
-          # X OAuth2 (posting)
           for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
             if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
           done
 
-          # X OAuth1 (media)
           for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
             if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
           done
 
-          # Facebook
           for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
             if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
           done
 
-          # Google content config (optional, but required if you want Google source)
-          for k in GOOGLE_SHEET_ID GOOGLE_SERVICE_ACCOUNT_JSON; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-          done
-
-          # Drive folder is optional unless you use Drive media
-          if [ -z "${GOOGLE_DRIVE_FOLDER_ID}" ]; then
-            echo "Missing secret: GOOGLE_DRIVE_FOLDER_ID (optional)"
-          fi
-
           if [ "$missing" -ne 0 ]; then
-            echo "One or more required secrets are missing. Fix repo secrets and re-run."
+            echo "One or more required secrets are missing."
             exit 1
           fi
+
+      - name: Run weather bot
         env:
           X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
           X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
@@ -112,72 +136,29 @@ jobs:
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-
-      - name: Run weather bot (RSS + socials)
-        env:
-          ALERT_FEED_URL: "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
-          TAY_COORDS_URL: "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
-          TAY_ALERTS_URL: "https://weatherpresenter.github.io/tay-weather-rss/tay/"
-
-          # Content configuration source
-          CONTENT_CONFIG_SOURCE: ${{ vars.CONTENT_CONFIG_SOURCE || 'auto' }}
-          CONTENT_CONFIG_XLSX: ${{ vars.CONTENT_CONFIG_XLSX || 'content_config.xlsx' }}
-
-          # Google private config + media
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-
-          # X OAuth 1.0a (required for media upload)
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
-
-          # X OAuth 2.0 (required for posting tweets)
-          X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
-          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
-          X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
-
-          # Facebook page posting
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-
-          # Camera image URLs (repo variables)
-          CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
-          CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
-
-          # Toggles
-          TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
-          ENABLE_X_POSTING: "true"
-          ENABLE_FB_POSTING: "true"
         run: |
           python tay_weather_bot.py
 
-      - name: Update X_REFRESH_TOKEN secret if rotated
+      - name: Update rotated X refresh token (if needed)
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_ACTIONS_SECRETS }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f "x_refresh_token_rotated.txt" ]; then
-            echo "Rotated X refresh token found. Updating repo secret X_REFRESH_TOKEN..."
-            NEW_TOKEN="$(cat x_refresh_token_rotated.txt)"
-            gh secret set X_REFRESH_TOKEN --body "$NEW_TOKEN" --repo "$GITHUB_REPOSITORY"
+            echo "Updating X_REFRESH_TOKEN secret..."
+            gh secret set X_REFRESH_TOKEN --body "$(cat x_refresh_token_rotated.txt)" --repo "$GITHUB_REPOSITORY"
             rm -f x_refresh_token_rotated.txt
           else
-            echo "No rotated X refresh token to update."
+            echo "No rotated X refresh token."
           fi
 
-      - name: Commit and push if changed
+      - name: Commit RSS + state updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add tay-weather.xml state.json || true
-
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
