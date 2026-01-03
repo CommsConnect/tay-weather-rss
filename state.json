@@ -2,5 +2,21 @@
   "fb_cooldown_until": null,
   "last_alert_hash": null,
   "last_fb_post_ts": null,
-  "last_x_post_ts": null
+  "last_x_post_ts": null,
+  "seen_ids": [],
+  "posted_guids": [
+    "tag:weather.gc.ca,2013-04-16:20260103143011"
+  ],
+  "posted_text_hashes": [
+    "ee29b9fd2217b7a09636abe31d15ca8482be5e38"
+  ],
+  "cooldowns": {
+    "2c0f9ca51a83a4f2b70e4e8033b85470e22c06b7": 1767458952
+  },
+  "global_last_post_ts": 1767458952,
+  "telegram_last_update_id": 0,
+  "pending_approvals": {},
+  "approval_decisions": {},
+  "token_to_guid": {},
+  "custom_one_shots_used": []
 }
