@@ -982,10 +982,11 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
     r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
     print("FB POST /feed status:", r.status_code)
-    if r.status_code >= 400:
-    raise RuntimeError(f"Facebook feed post failed {r.status_code} {r.text}")
-    return r.json()
 
+    if r.status_code >= 400:
+        raise RuntimeError(f"Facebook feed post failed {r.status_code} {r.text}")
+
+    return r.json()
 
 def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
