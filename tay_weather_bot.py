@@ -572,6 +572,11 @@ def get_oauth2_access_token() -> str:
 # X media upload helpers (OAuth 1.0a)
 # ----------------------------
 
+# ----------------------------
+# On511 camera "bug" overlay (stamp in lower-right corner)
+# - Applies only to Ontario 511 camera images (CR29 URLs)
+# - If anything fails, returns the original image bytes so posting still works
+# ----------------------------
 
 def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
     """
@@ -580,55 +585,62 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
     We only apply this to 511 camera captures (the CR29_NORTH/SOUTH URLs). If anything goes wrong,
     we return the original bytes so posting still works.
     """
-    try:
-        # Load base image
-        im = Image.open(BytesIO(image_bytes))
-        im = im.convert("RGBA")
+    # ------------------------------------------------------------
+    # Tuning knobs (easy to tweak)
+    # ------------------------------------------------------------
+    BUG_RELATIVE_WIDTH = 0.13   # was 0.18 → smaller (13% of image width)
+    BUG_MIN_WIDTH_PX   = 90     # was 120 → smaller minimum
+    BUG_OPACITY_ALPHA  = 140    # 0–255 (140 ≈ ~55% opacity)
+    BUG_PAD_RELATIVE   = 0.015  # padding relative to image width
 
+    try:
+        # ------------------------------------------------------------
+        # Load base image
+        # ------------------------------------------------------------
+        im = Image.open(BytesIO(image_bytes)).convert("RGBA")
+
+        # ------------------------------------------------------------
         # Load logo (repo asset)
+        # ------------------------------------------------------------
         asset_path = Path(__file__).resolve().parent / "assets" / "On511_logo.png"
         logo = Image.open(asset_path).convert("RGBA")
 
-        # Scale logo relative to image width
-        target_w = max(120, int(im.width * 0.18))
+        # ------------------------------------------------------------
+        # Scale logo relative to image width (smaller than before)
+        # ------------------------------------------------------------
+        target_w = max(BUG_MIN_WIDTH_PX, int(im.width * BUG_RELATIVE_WIDTH))
         scale = target_w / float(logo.width)
         target_h = max(1, int(logo.height * scale))
-        logo = logo.resize((target_w, target_h))
+        logo = logo.resize((target_w, target_h), resample=Image.LANCZOS)
 
-        # Bottom-right with padding
-        pad = max(8, int(im.width * 0.015))
+        # ------------------------------------------------------------
+        # Apply opacity (make it more subtle)
+        # ------------------------------------------------------------
+        if BUG_OPACITY_ALPHA < 255:
+            alpha = logo.getchannel("A")
+            alpha = alpha.point(lambda p: min(p, BUG_OPACITY_ALPHA))
+            logo.putalpha(alpha)
+
+        # ------------------------------------------------------------
+        # Bottom-right placement with padding
+        # ------------------------------------------------------------
+        pad = max(8, int(im.width * BUG_PAD_RELATIVE))
         x = max(0, im.width - logo.width - pad)
         y = max(0, im.height - logo.height - pad)
 
+        # Blend RGBA correctly
         im.alpha_composite(logo, (x, y))
 
-        # Encode back to JPEG (camera frames are JPEG; this keeps things compatible for X/FB)
+        # ------------------------------------------------------------
+        # Encode back to JPEG (camera frames are JPEG; keep compatible for X/FB)
+        # ------------------------------------------------------------
         out = BytesIO()
-        im = im.convert("RGB")
-        im.save(out, format="JPEG", quality=90, optimize=True)
+        im.convert("RGB").save(out, format="JPEG", quality=90, optimize=True)
         return out.getvalue(), "image/jpeg"
+
     except Exception as e:
         print("⚠️ On511 bug overlay failed; using original image:", e)
         return image_bytes, mime_type
-def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
-    image_url = (image_url or "").strip()
-    if not image_url:
-        raise RuntimeError("No image_url provided")
-
-    r = requests.get(image_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30), allow_redirects=True)
-    r.raise_for_status()
-
-    content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-    if not content_type.startswith("image/"):
-        raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
-
-    data = r.content
-
-    # Add bug for Ontario 511 cameras (CR29)
-    if "511on.ca/map/Cctv/" in image_url:
-        data, content_type = apply_on511_bug(data, content_type)
-
-    return data, content_type
 
 
 # Wire Facebook poster image loader (used only if non-URL refs are passed)
@@ -829,22 +841,32 @@ def main() -> None:
 
     camera_image_urls = resolve_cr29_image_urls()
 
-    if TEST_TWEET:
-        text = "Test post from Tay weather bot ✅"
-        if ENABLE_X_POSTING:
-            post_to_x(text, image_urls=camera_image_urls)
-        if ENABLE_FB_POSTING:
+    # ----------------------------
+    # Manual test mode (bypasses alerts + cooldown/dedupe)
+    # - Posts only to the platforms you selected in workflow_dispatch
+    # ----------------------------
+    if TEST_X or TEST_FACEBOOK:
+        base = "🧪 Test post — please ignore ✅"
+
+        if ENABLE_X_POSTING and TEST_X:
+            post_to_x(f"{base}\n\n(X)", image_urls=camera_image_urls)
+
+        if ENABLE_FB_POSTING and TEST_FACEBOOK:
             fb_state = fb.load_state("state.json")
             fb_result = fb.safe_post_facebook(
                 fb_state,
-                caption=text,
+                caption=f"{base}\n\n(Facebook)",
                 image_urls=camera_image_urls,
                 has_new_social_event=True,
                 state_path="state.json",
             )
             print("FB result:", fb_result)
-        return
 
+        return  # ✅ IMPORTANT: only return during test mode
+
+    # ----------------------------
+    # Normal mode (process real alerts)
+    # ----------------------------
     state = load_state()
     posted = set(state.get("posted_guids", []))
     posted_text_hashes = set(state.get("posted_text_hashes", []))
@@ -893,7 +915,6 @@ def main() -> None:
             print("Social skipped: duplicate text hash already posted")
             posted.add(guid)
             continue
-
 
         print("Social preview:", social_text.replace("\n", " "))
 
