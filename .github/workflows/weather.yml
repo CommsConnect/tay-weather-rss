@@ -125,6 +125,13 @@ jobs:
             exit 1
           fi
 
+            # ------------------------------------------------------------
+      # Run the weather bot
+      # - Fetches Environment Canada alerts
+      # - Builds images and messages
+      # - Posts to X / Facebook (or test mode)
+      # - Writes x_refresh_token_rotated.txt if X refresh token rotated
+      # ------------------------------------------------------------
       - name: Run weather bot
         env:
           X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
@@ -142,9 +149,28 @@ jobs:
         run: |
           python tay_weather_bot.py
 
-      # Update X refresh token if rotation occurred
+      # ------------------------------------------------------------
+      # Detect whether the X refresh token was rotated
+      # - Checks for x_refresh_token_rotated.txt created by the bot
+      # - Sets a step output so later steps can branch cleanly
+      # ------------------------------------------------------------
+      - name: Detect X refresh token rotation
+        id: xrot
+        run: |
+          if [ -f "x_refresh_token_rotated.txt" ]; then
+            echo "rotated=true" >> $GITHUB_OUTPUT
+          else
+            echo "rotated=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ------------------------------------------------------------
+      # Update the X_REFRESH_TOKEN repository secret (if rotated)
+      # - Uses a PAT via GH_TOKEN (not GITHUB_TOKEN)
+      # - Writes the new refresh token into Actions secrets
+      # - Removes the temporary token file after success
+      # ------------------------------------------------------------
       - name: Update rotated X refresh token
-        if: hashFiles('x_refresh_token_rotated.txt') != ''
+        if: steps.xrot.outputs.rotated == 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
@@ -152,14 +178,23 @@ jobs:
           gh secret set X_REFRESH_TOKEN \
             --body "$(cat x_refresh_token_rotated.txt)" \
             --repo "$GITHUB_REPOSITORY"
+          echo "✓ Updated X_REFRESH_TOKEN secret"
           rm -f x_refresh_token_rotated.txt
 
-      # Log when no rotation happened (optional, for clarity)
+      # ------------------------------------------------------------
+      # Log when no X refresh token rotation occurred
+      # - Runs only if the bot did not rotate the token
+      # ------------------------------------------------------------
       - name: No X refresh token rotation
-        if: hashFiles('x_refresh_token_rotated.txt') == ''
+        if: steps.xrot.outputs.rotated == 'false'
         run: |
           echo "No rotated X refresh token."
 
+      # ------------------------------------------------------------
+      # Commit generated RSS feed and state file (if changed)
+      # - Commits tay-weather.xml and state.json
+      # - Pushes only when there are actual changes
+      # ------------------------------------------------------------
       - name: Commit RSS + state updates
         run: |
           git config user.name "github-actions[bot]"
