@@ -142,17 +142,23 @@ jobs:
         run: |
           python tay_weather_bot.py
 
-      - name: Update rotated X refresh token (if needed)
+      # Update X refresh token if rotation occurred
+      - name: Update rotated X refresh token
+        if: hashFiles('x_refresh_token_rotated.txt') != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          if [ -f "x_refresh_token_rotated.txt" ]; then
-            echo "Updating X_REFRESH_TOKEN secret..."
-            gh secret set X_REFRESH_TOKEN --body "$(cat x_refresh_token_rotated.txt)" --repo "$GITHUB_REPOSITORY"
-            rm -f x_refresh_token_rotated.txt
-          else
-            echo "No rotated X refresh token."
-          fi
+          echo "Updating X_REFRESH_TOKEN secret..."
+          gh secret set X_REFRESH_TOKEN \
+            --body "$(cat x_refresh_token_rotated.txt)" \
+            --repo "$GITHUB_REPOSITORY"
+          rm -f x_refresh_token_rotated.txt
+
+      # Log when no rotation happened (optional, for clarity)
+      - name: No X refresh token rotation
+        if: hashFiles('x_refresh_token_rotated.txt') == ''
+        run: |
+          echo "No rotated X refresh token."
 
       - name: Commit RSS + state updates
         run: |
