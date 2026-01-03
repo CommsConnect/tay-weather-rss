@@ -1,15 +1,15 @@
-# tay_weather_bot_v2.py
+# tay_weather_bot.py
 #
-# Tay Township Weather Bot (v2 message builder)
+# Tay Township Weather Bot (v2.1)
 # - Uses Environment Canada ATOM feed as the alert list (source of truth)
 # - For each entry, fetches the EC HTML alert page and extracts:
 #     * issued time (short)
 #     * headline (first meaningful sentence before "What:")
 #     * What lines (X up to 2, Facebook up to 3)
-#     * When line (only if space on X; generally included on FB)
-# - Two images for both X and Facebook (Ontario 511 CR-29 cameras)
-# - Optional ON511 logo watermark applied locally before upload
-# - X: hard 280 chars including spaces, keep hashtags, no Oxford commas, Canadian spelling
+#     * When line (first sentence)
+# - Posts to X + Facebook (optional toggles)
+# - X: hard 280 chars including spaces
+# - Facebook: includes fuller care statement
 #
 import base64
 import datetime as dt
@@ -46,20 +46,20 @@ WATERMARK_ON511 = os.getenv("WATERMARK_ON511", "true").lower() == "true"
 ON511_LOGO_PATH = os.getenv("ON511_LOGO_PATH", "assets/On511_logo.png").strip()
 WATERMARK_OPACITY = float(os.getenv("WATERMARK_OPACITY", "0.35"))  # 0..1
 
-USER_AGENT = "tay-weather-rss-bot/2.0"
+USER_AGENT = "tay-weather-rss-bot/2.1"
 
 # Public “more info” URL (prefer GitHub page)
 TAY_COORDS_URL = os.getenv(
     "TAY_COORDS_URL",
     "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
 ).strip()
-
 TAY_ALERTS_URL = os.getenv("TAY_ALERTS_URL", "").strip()
 MORE_INFO_URL = (TAY_ALERTS_URL or TAY_COORDS_URL).strip()
 
 ALERT_FEED_URL = os.getenv(
     "ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
 ).strip()
+
 DISPLAY_AREA_NAME = "Tay Township area"
 
 # Ontario 511 cameras API
@@ -85,6 +85,8 @@ COOLDOWN_MINUTES = {
     "default": 180,
 }
 GLOBAL_COOLDOWN_MINUTES = 5
+
+MAX_RSS_ITEMS = 25
 
 # ----------------------------
 # Generic helpers
@@ -160,21 +162,16 @@ def save_state(state: dict) -> None:
 # Image helpers (ON511 watermark)
 # ----------------------------
 def overlay_on511_logo(img_bytes: bytes, logo_path: str) -> bytes:
-    """
-    Overlays the ON511 logo onto an image (bottom-right).
-    Returns new JPEG bytes.
-    """
+    """Overlay ON511 logo bottom-right; return JPEG bytes."""
     with Image.open(BytesIO(img_bytes)).convert("RGBA") as base:
         with Image.open(logo_path).convert("RGBA") as logo:
             bw, bh = base.size
 
-            # scale logo to ~6% of image width
             target_w = max(40, int(bw * 0.06))
             scale = target_w / max(1, logo.size[0])
             target_h = max(1, int(logo.size[1] * scale))
             logo = logo.resize((target_w, target_h), Image.LANCZOS)
 
-            # apply opacity
             if WATERMARK_OPACITY < 1.0:
                 alpha = logo.split()[-1]
                 opacity = max(0.0, min(1.0, WATERMARK_OPACITY))
@@ -289,18 +286,14 @@ def clean_atom_event_name(title_raw: str) -> str:
 def _html_to_text(html: str) -> str:
     if not html:
         return ""
-    # add newlines for common block boundaries before stripping tags
     html = re.sub(r"(?i)<br\s*/?>", "\n", html)
     html = re.sub(r"(?i)</p\s*>", "\n", html)
     html = re.sub(r"(?i)</div\s*>", "\n", html)
     html = re.sub(r"(?i)</li\s*>", "\n", html)
-    # strip scripts/styles
     html = re.sub(r"(?is)<script.*?>.*?</script>", "", html)
     html = re.sub(r"(?is)<style.*?>.*?</style>", "", html)
-    # strip tags
     text = re.sub(r"(?s)<.*?>", "", html)
     text = text.replace("\xa0", " ")
-    # normalize whitespace but keep line breaks
     text = re.sub(r"\r", "", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -309,10 +302,11 @@ def _html_to_text(html: str) -> str:
 
 def fetch_ec_page_details(url: str) -> Dict[str, Any]:
     """
-    STRICT EC parser:
-    - Only parses the alert body AFTER the "* * *" divider.
-    - If the divider can't be found, it returns empty headline/what/when
-      to prevent navbar/UI junk (e.g., "Edit My Profile") from ever appearing.
+    Robust EC parser:
+    - Prefer parsing only after "* * *" divider (prevents navbar/UI junk)
+    - If divider isn't found, fallback safely to the portion starting near "What:"
+    - Extract:
+        issued_short, headline, what_lines[], when_line
     """
     if not url:
         return {}
@@ -362,13 +356,17 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
             mon = mon_map.get(mon_name.strip().lower(), mon_name[:3].title())
             issued_short = f"Issued {mon} {day} {hh}:{mm}{'a' if ap=='am' else 'p'}"
 
-    # Narrative extraction (STRICT) — only after "* * *"
+    # Narrative extraction — prefer STRICT divider, fallback near What:
     narrative = ""
     m_sep = re.search(r"\*\s*\*\s*\*", text)
     if m_sep:
         narrative = text[m_sep.end():].strip()
+    else:
+        m_what = re.search(r"\bWhat:\b", text)
+        if m_what:
+            start = max(0, m_what.start() - 500)  # include a bit of context for headline
+            narrative = text[start:].strip()
 
-    # If divider isn't found, fail cleanly
     if not narrative:
         return {
             "issued_raw": issued_raw,
@@ -389,7 +387,7 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
         else:
             what_block = after_what
 
-    # Headline: first meaningful line before "What:"
+    # Headline: first meaningful sentence before "What:"
     headline = ""
     before_what = narrative.split("What:", 1)[0] if "What:" in narrative else narrative
 
@@ -409,6 +407,10 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
             return False
 
         for ln in lines:
+            up = ln.upper()
+            # Skip shouty boilerplate-ish lines
+            if "WARNING" in up or "WATCH" in up or "ADVISORY" in up or "STATEMENT" in up:
+                continue
             if looks_like_fragment(ln):
                 continue
             headline = ln
@@ -469,76 +471,67 @@ def fetch_ec_page_details(url: str) -> Dict[str, Any]:
 # ----------------------------
 def build_x_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
     """
-    X (Twitter):
-    - Line 1 MUST end with: "in Tay Township."
-    - Include headline + What + When + care + More + Issued + hashtags if possible
-    - Hard limit 280 chars (including spaces)
-    - No "What:" / "When:" labels
-    - No blank lines (saves characters)
+    X:
+    - Line 1 must end with "in Tay Township."
+    - Must TRY to include: What (up to 2), When, care, More, Issued, hashtags
+    - Hard limit 280 chars incl spaces
     """
     headline = (details.get("headline") or "").strip()
     what_lines = [w.strip() for w in (details.get("what_lines") or []) if (w or "").strip()]
     when_line = (details.get("when_line") or "").strip()
     issued_short = (details.get("issued_short") or "").strip()
 
-    care = "Please take care, travel only if needed and check on neighbours who may need support."
+    # X care line(s) — progressively shorter fallbacks if we hit 280
+    care_long = "Please take care, travel only if needed and check on neighbours who may need support."
+    care_mid = "Please take care, travel only if needed and check on neighbours who may need support."
+    care_short = "Please take care, travel only if needed."
 
-    # Line 1: emoji - headline in Tay Township.
+    # Line 1 (your required format)
     if headline:
         h = headline[:-1] if headline.endswith(".") else headline
         line1 = f"{emoji} - {h} in Tay Township."
     else:
         line1 = f"{emoji} - {event_name} in Tay Township."
 
-    # We want: line1 + up to 2 what lines + when + care + More + Issued + hashtags
     chosen_what = what_lines[:X_WHAT_MAX]
 
     def compose(
-        include_what_count: int,
+        what_count: int,
         include_when: bool,
-        include_care: bool,
+        care: str,
         include_issued: bool,
         include_tags: bool,
     ) -> str:
         lines: List[str] = [line1]
-
-        if include_what_count > 0:
-            lines.extend(chosen_what[:include_what_count])
-
+        if what_count > 0:
+            lines.extend(chosen_what[:what_count])
         if include_when and when_line:
             lines.append(when_line)
-
-        if include_care:
+        if care:
             lines.append(care)
-
         lines.append(f"More: {MORE_INFO_URL}")
-
         if include_issued and issued_short:
             lines.append(issued_short)
-
         if include_tags and HASHTAGS:
             lines.append(HASHTAGS)
-
-        # No blank lines between blocks
         return "\n".join([ln for ln in lines if ln]).strip()
 
-    # Try richest → leanest (drop only what we must)
+    # Priority: keep What+When. Drop issued before dropping core info.
     candidates = [
-        compose(2, True, True, True, True),
-        compose(2, True, True, False, True),   # drop issued
-        compose(2, True, False, False, True),  # drop care
-        compose(2, False, False, False, True), # drop when
-        compose(1, True, False, False, True),  # drop 2nd what
-        compose(1, False, False, False, True), # drop when too
-        compose(0, False, False, False, True), # headline + link + tags only
-        compose(0, False, False, False, False) # absolute minimum
+        compose(2, True, care_long, True, True),
+        compose(2, True, care_mid, False, True),     # drop issued
+        compose(2, True, care_short, False, True),   # shorter care
+        compose(1, True, care_short, False, True),   # drop 2nd what
+        compose(1, True, "", False, True),           # drop care if absolutely needed
+        compose(1, True, "", False, False),          # drop hashtags last resort
+        compose(0, True, "", False, False),          # when only
+        compose(0, False, "", False, False),         # absolute minimum
     ]
 
     for t in candidates:
         if len(t) <= 280:
             return t
 
-    # Ultra-last resort: just line1
     return line1[:280]
 
 
@@ -546,9 +539,7 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
     """
     Facebook:
     - Line 1 must end with "in Tay Township."
-    - Include headline + up to 3 What lines + When line + care + More + Issued + hashtags
-    - No "What:" / "When:" labels
-    - No blank lines (matches your sample)
+    - Include: What (up to 3), When, care, More, Issued, hashtags
     """
     headline = (details.get("headline") or "").strip()
     what_lines = [w.strip() for w in (details.get("what_lines") or []) if (w or "").strip()]
@@ -568,7 +559,6 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
         line1 = f"{emoji} - {event_name} in Tay Township."
 
     lines: List[str] = [line1]
-
     lines.extend(what_lines[:FB_WHAT_MAX])
 
     if when_line:
@@ -584,6 +574,7 @@ def build_fb_text(event_name: str, emoji: str, details: Dict[str, Any]) -> str:
         lines.append(HASHTAGS)
 
     return "\n".join([ln for ln in lines if ln]).strip()
+
 
 # ----------------------------
 # RSS helpers
@@ -653,7 +644,18 @@ def trim_rss_items(channel: ET.Element, max_items: int) -> None:
         channel.remove(item)
 
 
-MAX_RSS_ITEMS = 25
+def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
+    title = (entry.get("title") or "").strip()
+    issued = (entry.get("summary") or "").strip()
+    official = (entry.get("link") or "").strip()
+    bits = [title]
+    if issued:
+        bits.append(issued)
+    bits.append(f"More info (Tay Township): {MORE_INFO_URL}")
+    if official:
+        bits.append(f"Official alert details: {official}")
+    return "\n".join(bits)
+
 
 # ----------------------------
 # Cooldown logic
@@ -878,7 +880,6 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
 
     img = r.content
 
-    # Apply watermark (optional)
     if WATERMARK_ON511 and os.path.exists(ON511_LOGO_PATH):
         try:
             img = overlay_on511_logo(img, ON511_LOGO_PATH)
@@ -965,7 +966,7 @@ def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, An
         if r.status_code == 403 and "duplicate" in detail:
             raise RuntimeError("X_DUPLICATE_TWEET")
 
-        raise RuntimeError(f"X post failed {r.status_code}")
+        raise RuntimeError(f"X post failed {r.status_code} {r.text}")
 
     return r.json()
 
@@ -982,11 +983,10 @@ def post_to_facebook_page(message: str) -> Dict[str, Any]:
     url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
     r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
     print("FB POST /feed status:", r.status_code)
-
     if r.status_code >= 400:
         raise RuntimeError(f"Facebook feed post failed {r.status_code} {r.text}")
-
     return r.json()
+
 
 def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
@@ -996,7 +996,6 @@ def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
     if not image_url:
         raise RuntimeError("Missing image_url for FB photo post")
 
-    # download + watermark (same function used for X)
     img_bytes, mime_type = download_image_bytes(image_url)
 
     url = f"https://graph.facebook.com/v24.0/{page_id}/photos"
@@ -1065,86 +1064,10 @@ def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[
 
 
 # ----------------------------
-# RSS description
-# ----------------------------
-def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
-    title = (entry.get("title") or "").strip()
-    issued = (entry.get("summary") or "").strip()
-    official = (entry.get("link") or "").strip()
-    bits = [title]
-    if issued:
-        bits.append(issued)
-    bits.append(f"More info (Tay Township): {MORE_INFO_URL}")
-    if official:
-        bits.append(f"Official alert details: {official}")
-    return "\n".join(bits)
-
-
-# ----------------------------
-# RSS file functions
-# ----------------------------
-def ensure_rss_exists() -> None:
-    if os.path.exists(RSS_PATH):
-        return
-
-    rss = ET.Element("rss", version="2.0")
-    channel = ET.SubElement(rss, "channel")
-
-    ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
-    ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
-    ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
-    ET.SubElement(channel, "language").text = "en-ca"
-
-    ET.ElementTree(rss).write(RSS_PATH, encoding="utf-8", xml_declaration=True)
-
-
-def load_rss_tree() -> Tuple[ET.ElementTree, ET.Element]:
-    ensure_rss_exists()
-    tree = ET.parse(RSS_PATH)
-    root = tree.getroot()
-    channel = root.find("channel")
-    if channel is None:
-        raise RuntimeError("RSS file missing <channel>")
-    return tree, channel
-
-
-def rss_item_exists(channel: ET.Element, guid_text: str) -> bool:
-    for item in channel.findall("item"):
-        guid = item.find("guid")
-        if guid is not None and (guid.text or "").strip() == guid_text:
-            return True
-    return False
-
-
-def add_rss_item(channel: ET.Element, title: str, link: str, guid: str, pub_date: str, description: str) -> None:
-    item = ET.Element("item")
-    ET.SubElement(item, "title").text = title
-    ET.SubElement(item, "link").text = link
-    g = ET.SubElement(item, "guid")
-    g.text = guid
-    g.set("isPermaLink", "false")
-    ET.SubElement(item, "pubDate").text = pub_date
-    ET.SubElement(item, "description").text = description
-
-    insert_index = 0
-    for i, child in enumerate(list(channel)):
-        if child.tag in {"title", "link", "description", "language", "lastBuildDate"}:
-            insert_index = i + 1
-    channel.insert(insert_index, item)
-
-
-def trim_rss_items(channel: ET.Element, max_items: int) -> None:
-    items = channel.findall("item")
-    if len(items) <= max_items:
-        return
-    for item in items[max_items:]:
-        channel.remove(item)
-
-
-# ----------------------------
 # Main
 # ----------------------------
 def main() -> None:
+    # clear rotated token marker if left over
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
         try:
             os.remove(ROTATED_X_REFRESH_TOKEN_PATH)
@@ -1194,6 +1117,7 @@ def main() -> None:
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
             new_rss_items += 1
 
+        # Only social-post each GUID once
         if guid in posted:
             continue
 
@@ -1206,11 +1130,10 @@ def main() -> None:
         emoji = emoji_from_atom_title(entry.get("title") or "")
         event_name = clean_atom_event_name(entry.get("title") or "")
 
-        details: Dict[str, Any] = {}
         try:
             details = fetch_ec_page_details((entry.get("link") or "").strip())
         except Exception as e:
-            print(f"⚠️ EC page parse failed, falling back to ATOM summary only: {e}")
+            print(f"⚠️ EC page parse failed, falling back to ATOM-only: {e}")
             details = {}
 
         x_text = build_x_text(event_name, emoji, details)
@@ -1253,6 +1176,7 @@ def main() -> None:
         else:
             print("No social posts sent for this alert.")
 
+    # RSS housekeeping
     lbd = channel.find("lastBuildDate")
     if lbd is None:
         lbd = ET.SubElement(channel, "lastBuildDate")
@@ -1261,6 +1185,7 @@ def main() -> None:
     trim_rss_items(channel, MAX_RSS_ITEMS)
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
 
+    # Persist state
     state["posted_guids"] = list(posted)
     state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
