@@ -990,10 +990,11 @@ def main() -> None:
 
             # Always send preview once (for both warnings and watches)
             preview_text = (
-                f"🚨 {title}\n"
+                f"🚨 {title}\n\n"
                 f"{social_text}\n\n"
-                f"Images: {len(camera_image_urls)}\n\n"
-                f"Type: {alert_kind.upper()}"
+                f"Images: {len(camera_image_urls)}\n"
+                f"Alert type: {alert_kind.upper()}\n\n"
+                f"More information:\n{MORE_INFO_URL}"
             )
             ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind)
 
