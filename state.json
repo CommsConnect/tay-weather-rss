@@ -10,8 +10,15 @@
       "preview_text": "\ud83d\udea8 No alerts in effect (Tay Township area)\n\u26aa No alerts in effect (Tay Township area) | No alerts in effect. | More: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768 | #TayTownship #ONStorm\n\nImages: 2\n\nType: OTHER",
       "kind": "other",
       "reminded_at": null
+    },
+    "0ecda16b76": {
+      "created_at": "2026-01-04T17:11:50Z",
+      "preview_text": "Testing the validity of the post \u2014 please ignore \u2705\n\nPlatforms: X + Facebook\n\nIf you approve, re-run the workflow and the test post will publish.\n\nTOKEN: 0ecda16b76",
+      "kind": "other",
+      "reminded_at": null
     }
   },
   "approval_decisions": {},
-  "telegram_last_update_id": 259933287
+  "telegram_last_update_id": 259933291,
+  "test_gate_token": "0ecda16b76"
 }
