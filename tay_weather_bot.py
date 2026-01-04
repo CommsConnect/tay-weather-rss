@@ -168,25 +168,20 @@ def load_state() -> dict:
         "posted_text_hashes": [],
         "cooldowns": {},
         "global_last_post_ts": 0,
+
+        # Telegram gate state
+        "pending_approvals": {},
+        "approval_decisions": {},
+        "telegram_last_update_id": 0,
+        "telegram_last_signal": None,
+        "test_gate_token": "",
     }
-    if not os.path.exists(STATE_PATH):
-        return default
-
-    try:
-        raw = open(STATE_PATH, "r", encoding="utf-8").read().strip()
-        if not raw:
-            return default
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            return default
-    except Exception:
-        return default
-
-    data.setdefault("seen_ids", [])
-    data.setdefault("posted_guids", [])
-    data.setdefault("posted_text_hashes", [])
-    data.setdefault("cooldowns", {})
-    data.setdefault("global_last_post_ts", 0)
+    ...
+    data.setdefault("pending_approvals", {})
+    data.setdefault("approval_decisions", {})
+    data.setdefault("telegram_last_update_id", 0)
+    data.setdefault("telegram_last_signal", None)
+    data.setdefault("test_gate_token", "")
     return data
 
 
@@ -202,6 +197,23 @@ def save_state(state: dict) -> None:
 
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
+
+def materialize_images_for_facebook(image_urls: List[str]) -> List[str]:
+    """
+    Facebook path: force our downloader/bug overlay to run by converting remote URLs
+    into local temp files (non-URL refs). Your fb module only uses fb.load_image_bytes
+    for non-URL inputs.
+    Returns list of local file paths.
+    """
+    out_paths: List[str] = []
+    for i, u in enumerate([x for x in (image_urls or []) if (x or "").strip()][:10]):
+        b, mt = download_image_bytes(u)  # <-- applies bug overlay for 511 URLs
+        ext = "png" if mt == "image/png" else "jpg"
+        p = f"/tmp/tay_cam_{i}.{ext}"
+        with open(p, "wb") as f:
+            f.write(b)
+        out_paths.append(p)
+    return out_paths
 
 
 # ----------------------------
@@ -636,8 +648,10 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
         # ------------------------------------------------------------
         if BUG_OPACITY_ALPHA < 255:
             alpha = logo.getchannel("A")
-            alpha = alpha.point(lambda p: min(p, BUG_OPACITY_ALPHA))
+            scale = BUG_OPACITY_ALPHA / 255.0
+            alpha = alpha.point(lambda p: int(p * scale))
             logo.putalpha(alpha)
+
 
         # ------------------------------------------------------------
         # Bottom-right placement with padding
@@ -653,8 +667,9 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
         # Encode back to JPEG (camera frames are JPEG; keep compatible for X/FB)
         # ------------------------------------------------------------
         out = BytesIO()
-        im.convert("RGB").save(out, format="JPEG", quality=90, optimize=True)
-        return out.getvalue(), "image/jpeg"
+        # Lossless output keeps the bug sharp
+        im.save(out, format="PNG", optimize=True)
+        return out.getvalue(), "image/png"
 
     except Exception as e:
         print("⚠️ On511 bug overlay failed; using original image:", e)
@@ -958,7 +973,7 @@ def main() -> None:
                 token,
                 preview_text,
                 kind="other",
-                image_urls=camera_image_urls,
+                image_urls=materialize_images_for_facebook(camera_image_urls),
             )
 
             # If already decided, use it; otherwise wait in THIS run (so you don't need rerun)
@@ -994,7 +1009,7 @@ def main() -> None:
             fb_result = fb.safe_post_facebook(
                 fb_state,
                 caption=f"{base}\n\n(Facebook)",
-                image_urls=camera_image_urls,
+                image_urls=materialize_images_for_facebook(camera_image_urls),
                 has_new_social_event=True,
                 state_path="state.json",
             )
@@ -1123,7 +1138,7 @@ def main() -> None:
                 token,
                 preview_text,
                 kind=alert_kind,
-                image_urls=camera_image_urls,
+                image_urls=materialize_images_for_facebook(camera_image_urls),
             )
 
             d = decision_for(state, token)
@@ -1181,7 +1196,7 @@ def main() -> None:
             fb_result = fb.safe_post_facebook(
                 state,
                 caption=social_text,
-                image_urls=camera_image_urls,
+                image_urls=materialize_images_for_facebook(camera_image_urls),
                 has_new_social_event=True,
                 state_path="state.json",
             )
