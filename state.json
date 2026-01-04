@@ -1,27 +1,17 @@
 {
   "seen_ids": [],
-  "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744"
-  ],
-  "posted_text_hashes": [
-    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20"
-  ],
+  "posted_guids": [],
+  "posted_text_hashes": [],
   "cooldowns": {},
   "global_last_post_ts": 0,
+
   "pending_approvals": {},
-  "approval_decisions": {
-    "42f5cba59f": {
-      "decision": "approved",
-      "decided_at": "2026-01-04T23:31:10Z"
-    }
-  },
-  "telegram_last_update_id": 259933321,
-  "telegram_last_signal": {
-    "token": "42f5cba59f",
-    "decision": "approved",
-    "decided_at": "2026-01-04T23:31:10Z"
-  },
+  "approval_decisions": {},
+  "telegram_last_update_id": 0,
+  "telegram_last_signal": null,
   "test_gate_token": "",
-  "fb_last_posted_at": "2026-01-04T23:31:16.519415Z",
-  "fb_cooldown_until": "2026-01-05T00:31:16.519415Z"
+
+  "fb_cooldown_until": 0,
+  "fb_last_posted_at": 0,
+  "fb_last_post_hash": ""
 }
