@@ -176,12 +176,25 @@ def load_state() -> dict:
         "telegram_last_signal": None,
         "test_gate_token": "",
     }
-    ...
-    data.setdefault("pending_approvals", {})
-    data.setdefault("approval_decisions", {})
-    data.setdefault("telegram_last_update_id", 0)
-    data.setdefault("telegram_last_signal", None)
-    data.setdefault("test_gate_token", "")
+
+    if not os.path.exists(STATE_PATH):
+        return default
+
+    try:
+        raw = open(STATE_PATH, "r", encoding="utf-8").read().strip()
+        if not raw:
+            return default
+
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return default
+    except Exception:
+        return default
+
+    # Ensure required keys always exist
+    for k, v in default.items():
+        data.setdefault(k, v)
+
     return data
 
 
