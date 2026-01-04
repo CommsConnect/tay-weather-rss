@@ -3,6 +3,10 @@
     "72af48cd53": {
       "decided_at": "2026-01-04T18:52:24Z",
       "decision": "approved"
+    },
+    "ef9db08e4e": {
+      "decision": "denied",
+      "decided_at": "2026-01-04T18:55:43Z"
     }
   },
   "cooldowns": {},
@@ -14,10 +18,10 @@
   "posted_text_hashes": [],
   "seen_ids": [],
   "telegram_last_signal": {
-    "decided_at": "2026-01-04T18:52:24Z",
-    "decision": "approved",
-    "token": "72af48cd53"
+    "token": "ef9db08e4e",
+    "decision": "denied",
+    "decided_at": "2026-01-04T18:55:43Z"
   },
-  "telegram_last_update_id": 259933313,
-  "test_gate_token": "72af48cd53"
+  "telegram_last_update_id": 259933314,
+  "test_gate_token": "ef9db08e4e"
 }
