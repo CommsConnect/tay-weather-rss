@@ -893,7 +893,7 @@ def main() -> None:
                 fb_state,
                 caption=f"{base}\n\n(Facebook)",
                 image_urls=camera_image_urls,
-                has_new_social_event=True,
+                has_new_social_event=False,
                 state_path="state.json",
             )
             print("FB result:", fb_result)
