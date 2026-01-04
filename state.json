@@ -14,7 +14,9 @@
   "fb_last_posted_at": "2026-01-04T18:52:27.621810Z",
   "global_last_post_ts": 0,
   "pending_approvals": {},
-  "posted_guids": [],
+  "posted_guids": [
+    "tag:weather.gc.ca,2013-04-16:20260103143011"
+  ],
   "posted_text_hashes": [],
   "seen_ids": [],
   "telegram_last_signal": {
