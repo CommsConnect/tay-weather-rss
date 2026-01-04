@@ -941,27 +941,29 @@ def main() -> None:
         link = MORE_INFO_URL
         description = build_rss_description_from_atom(entry)
 
-        # --- Social filter: skip "ended/cancelled/no longer in effect" items ---
+        # --- Social filter: skip "ended/cancelled/no longer in effect/no alerts" items ---
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
-        ended_markers = (
+        inactive_markers = (
             "ended",
             "has ended",
             "cancelled",
-            "canceled",  # just in case
             "no longer in effect",
             "is no longer in effect",
             "terminated",
             "rescinded",
+            "no alerts in effect",
+            "no watches or warnings in effect",
         )
 
-        if any(m in title_l for m in ended_markers) or any(m in summary_l for m in ended_markers):
-            print(f"Info: non-active alert item in feed — skipping social post: {title}")
+        if any(m in title_l for m in inactive_markers) or any(m in summary_l for m in inactive_markers):
+            print(f"Info: non-active / no-alert item in feed — skipping social post: {title}")
             posted.add(guid)  # prevents re-checking every run
             continue
 
         active_candidates += 1
+
 
         
         if not rss_item_exists(channel, guid):
@@ -1063,8 +1065,7 @@ def main() -> None:
         # ================================
     
     if active_candidates == 0:
-        print("Info: no active weather alerts — nothing to post. Exiting cleanly.")
-        return
+        print("Info: no active weather alerts — nothing to post.")
 
 if __name__ == "__main__":
     main()
