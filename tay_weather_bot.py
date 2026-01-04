@@ -642,6 +642,34 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
         print("⚠️ On511 bug overlay failed; using original image:", e)
         return image_bytes, mime_type
 
+def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
+    """
+    Downloads an image URL and returns (bytes, mime_type).
+    Applies the On511 bug overlay for Ontario 511 camera captures.
+    """
+    image_url = (image_url or "").strip()
+    if not image_url:
+        raise RuntimeError("No image_url provided")
+
+    r = requests.get(
+        image_url,
+        headers={"User-Agent": USER_AGENT},
+        timeout=(10, 30),
+        allow_redirects=True,
+    )
+    r.raise_for_status()
+
+    content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if not content_type.startswith("image/"):
+        raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
+
+    data = r.content
+
+    # Add bug for Ontario 511 cameras (CR29)
+    if "511on.ca/map/Cctv/" in image_url:
+        data, content_type = apply_on511_bug(data, content_type)
+
+    return data, content_type
 
 # Wire Facebook poster image loader (used only if non-URL refs are passed)
 fb.load_image_bytes = download_image_bytes
