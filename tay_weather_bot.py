@@ -885,6 +885,7 @@ def classify_alert_kind(title: str) -> str:
         return "watch"
     return "other"
 
+
 def main() -> None:
     # Clean up any previous rotated token file
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
@@ -895,16 +896,14 @@ def main() -> None:
 
     camera_image_urls = resolve_cr29_image_urls()
 
-    # ----------------------------
+    # =========================================================
     # Manual test mode (bypasses alerts + cooldown/dedupe)
     # - Posts only to the platforms you selected in workflow_dispatch
-    # ----------------------------
+    # - If Telegram gate enabled: preview -> approve/deny confirmation -> post
+    # =========================================================
     if TEST_X or TEST_FACEBOOK:
         base = "Testing the validity of the post — please ignore ✅"
-    
-        # Optional Telegram gate for test runs too.
-        # - First test run sends a Telegram preview with Approve/Deny buttons and exits.
-        # - After you approve, re-run the workflow_dispatch test and the bot will post.
+
         if TELEGRAM_ENABLE_GATE:
             from telegram_gate import (
                 ingest_telegram_actions,
@@ -916,35 +915,43 @@ def main() -> None:
             )
 
             st = load_state()
+
+            # Ingest any previous button taps/commands and send reminders if needed
             ingest_telegram_actions(st, save_state)
             maybe_send_reminders(st, save_state)
 
-            # Reuse the same token across reruns until it is decided or expires.
+            # Reuse the same test token across reruns until decided or expired
             token = (st.get("test_gate_token") or "").strip()
             created_at = None
             if token:
                 created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
 
             if (
-                not token
+                (not token)
                 or (created_at and is_expired(st, token))
                 or (token and decision_for(st, token) in ("approved", "denied"))
             ):
-                token = hashlib.sha1(f"test:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
+                token = hashlib.sha1(
+                    f"test:{dt.datetime.utcnow().isoformat()}".encode("utf-8")
+                ).hexdigest()[:10]
                 st["test_gate_token"] = token
                 save_state(st)
 
+            platforms = []
+            if ENABLE_X_POSTING and TEST_X:
+                platforms.append("X")
+            if ENABLE_FB_POSTING and TEST_FACEBOOK:
+                platforms.append("Facebook")
+            platforms_str = " + ".join(platforms) if platforms else "None"
+
             preview_text = (
                 f"{base}\n\n"
-                f"Platforms: "
-                f"{'X' if (ENABLE_X_POSTING and TEST_X) else ''}"
-                f"{' + ' if (ENABLE_X_POSTING and TEST_X and ENABLE_FB_POSTING and TEST_FACEBOOK) else ''}"
-                f"{'Facebook' if (ENABLE_FB_POSTING and TEST_FACEBOOK) else ''}\n\n"
-                f"Tap approve/deny below.\n\n"
+                f"Platforms: {platforms_str}\n\n"
+                f"Tap ✅ Approve / 🛑 Deny below.\n\n"
                 f"TOKEN: {token}"
             )
 
-            # Send preview (once) with buttons
+            # Send preview once (with buttons message that will be edited on decision)
             ensure_preview_sent(
                 st,
                 save_state,
@@ -954,11 +961,17 @@ def main() -> None:
                 image_urls=camera_image_urls,
             )
 
-            # If already decided, use it; otherwise wait a bit in this same run
+            # If already decided, use it; otherwise wait in THIS run (so you don't need rerun)
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
                 wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
-                d = wait_for_decision(st, save_state, token, max_wait_seconds=wait_seconds, poll_interval_seconds=4)
+                d = wait_for_decision(
+                    st,
+                    save_state,
+                    token,
+                    max_wait_seconds=wait_seconds,
+                    poll_interval_seconds=4,
+                )
 
             if d == "denied":
                 print("Telegram: denied (test). Not posting.")
@@ -968,66 +981,68 @@ def main() -> None:
                 print("Telegram: still pending (test). Not posting this run.")
                 return
 
-    
+        # --- Post after Telegram gate passed (or gate disabled) ---
         if ENABLE_X_POSTING and TEST_X:
             post_to_x(f"{base}\n\n(X)", image_urls=camera_image_urls)
-    
+
         if ENABLE_FB_POSTING and TEST_FACEBOOK:
             fb_state = load_state()
             # Tests should actually hit Facebook even if you recently posted.
-            # Clear cooldown markers for this single run.
             fb_state.pop("fb_cooldown_until", None)
             fb_state.pop("fb_last_posted_at", None)
-    
+
             fb_result = fb.safe_post_facebook(
                 fb_state,
                 caption=f"{base}\n\n(Facebook)",
                 image_urls=camera_image_urls,
-                # In test mode we *want* an actual post even though there is no "new alert".
                 has_new_social_event=True,
                 state_path="state.json",
             )
             print("FB result:", fb_result)
-    
+
         return  # ✅ IMPORTANT: only return during test mode
 
-    # ----------------------------
+    # =========================================================
     # Normal mode (process real alerts)
-    # ----------------------------
+    # - Builds RSS items
+    # - Telegram preview gate:
+    #     * WATCH/OTHER: require explicit approve (waits up to TELEGRAM_WAIT_SECONDS)
+    #     * WARNING: auto-post after TELEGRAM_PREVIEW_DELAY_MIN unless denied
+    # - After approval/policy passes: posts to X + Facebook, then records state
+    # =========================================================
     state = load_state()
     posted = set(state.get("posted_guids", []))
     posted_text_hashes = set(state.get("posted_text_hashes", []))
-    
+
     tree, channel = load_rss_tree()
-    
+
     new_rss_items = 0
     social_posted = 0
     social_skipped_cooldown = 0
     active_candidates = 0
-    
+
     try:
         atom_entries = fetch_atom_entries(ALERT_FEED_URL)
     except Exception as e:
         print(f"⚠️ ATOM feed unavailable: {e}")
         print("Exiting cleanly; will retry on next scheduled run.")
         return
-    
+
     for entry in atom_entries:
         guid = atom_entry_guid(entry)
         if not guid:
             continue
-    
-        # --- RSS item build/write (keep this) ---
+
+        # --- RSS item build/write ---
         title = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
         pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
         pub_date = email.utils.format_datetime(pub_dt)
         link = MORE_INFO_URL
         description = build_rss_description_from_atom(entry)
 
-        # --- Social filter: skip "ended/cancelled/no longer in effect/no alerts" items ---
+        # --- Social filter: skip ended/cancelled/no-alert entries ---
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
-
         inactive_markers = (
             "ended",
             "has ended",
@@ -1039,7 +1054,6 @@ def main() -> None:
             "no alerts in effect",
             "no watches or warnings in effect",
         )
-
         if any(m in title_l for m in inactive_markers) or any(m in summary_l for m in inactive_markers):
             print(f"Info: non-active / no-alert item in feed — skipping social post: {title}")
             posted.add(guid)  # prevents re-checking every run
@@ -1047,36 +1061,34 @@ def main() -> None:
 
         active_candidates += 1
 
-
-        
         if not rss_item_exists(channel, guid):
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
             new_rss_items += 1
-    
+
         # --- Dedupe: already posted this guid ---
         if guid in posted:
             continue
-    
-        # --- Cooldown gate (keep this) ---
+
+        # --- Cooldown gate ---
         allowed, reason = cooldown_allows_post(state, DISPLAY_AREA_NAME, kind="alert")
         if not allowed:
             social_skipped_cooldown += 1
             print("Social skipped:", reason)
             continue
-    
+
         # --- Build social text + dedupe by text ---
         social_text = build_social_text_from_atom(entry)
         h = text_hash(social_text)
-    
+
         if h in posted_text_hashes:
             print("Social skipped: duplicate text hash already posted")
             posted.add(guid)
             continue
-    
+
         print("Social preview:", social_text.replace("\n", " "))
 
         # ================================
-        # TELEGRAM PREVIEW + POLICY (warnings vs watches)
+        # TELEGRAM PREVIEW + POLICY
         # ================================
         if TELEGRAM_ENABLE_GATE:
             from telegram_gate import (
@@ -1086,6 +1098,7 @@ def main() -> None:
                 is_expired,
                 warning_delay_elapsed,
                 maybe_send_reminders,
+                wait_for_decision,
             )
 
             alert_kind = classify_alert_kind(title)  # "warning" | "watch" | "other"
@@ -1097,14 +1110,13 @@ def main() -> None:
             # Optional reminder ping near expiry
             maybe_send_reminders(state, save_state)
 
-            # Always send preview once (for both warnings and watches)
+            # Always send preview once (albums + separate buttons message)
             preview_text = (
                 f"🚨 {title}\n\n"
                 f"{social_text}\n\n"
                 f"Alert type: {alert_kind.upper()}\n\n"
                 f"More information:\n{MORE_INFO_URL}"
             )
-            
             ensure_preview_sent(
                 state,
                 save_state,
@@ -1114,49 +1126,90 @@ def main() -> None:
                 image_urls=camera_image_urls,
             )
 
-
             d = decision_for(state, token)
 
-            if alert_kind == "watch":
-                # WATCHES: must explicitly approve
+            # WATCH / OTHER: require explicit approve (wait up to TELEGRAM_WAIT_SECONDS)
+            if alert_kind in ("watch", "other"):
                 if d == "denied":
-                    print("Telegram: denied (watch). Skipping.")
-                    continue
-                if d != "approved":
-                    if is_expired(state, token):
-                        print("Telegram: expired (watch). Skipping.")
-                        continue
-                    print("Telegram: pending (watch). Waiting for approval.")
+                    print(f"Telegram: denied ({alert_kind}). Skipping.")
                     continue
 
+                if d != "approved":
+                    if is_expired(state, token):
+                        print(f"Telegram: expired ({alert_kind}). Skipping.")
+                        continue
+
+                    wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
+                    print(f"Telegram: pending ({alert_kind}). Waiting up to {wait_seconds}s for approval.")
+                    d = wait_for_decision(
+                        state,
+                        save_state,
+                        token,
+                        max_wait_seconds=wait_seconds,
+                        poll_interval_seconds=4,
+                    )
+
+                    if d == "denied":
+                        print(f"Telegram: denied ({alert_kind}) after wait. Skipping.")
+                        continue
+                    if d != "approved":
+                        print(f"Telegram: still pending ({alert_kind}) after wait. Skipping this run.")
+                        continue
+
+            # WARNING: auto-post after delay unless denied
             elif alert_kind == "warning":
-                # WARNINGS: auto-post after delay unless denied
                 if d == "denied":
                     print("Telegram: denied (warning). Skipping.")
                     continue
 
-                # Wait until preview delay has elapsed (10 min)
                 if not warning_delay_elapsed(state, token):
                     print("Telegram: warning preview delay not elapsed yet. Skipping this run.")
                     continue
 
-            else:
-                # OTHER: require explicit approve
-                if d == "denied":
-                    print("Telegram: denied (other). Skipping.")
-                    continue
-                if d != "approved":
-                    if is_expired(state, token):
-                        print("Telegram: expired (other). Skipping.")
-                        continue
-                    print("Telegram: pending (other). Waiting for approval.")
-                    continue
         # ================================
         # END TELEGRAM POLICY
         # ================================
-    
+
+        # --- Actually post now that Telegram policy passed ---
+        posted_this = False
+
+        if ENABLE_X_POSTING:
+            post_to_x(social_text, image_urls=camera_image_urls)
+            posted_this = True
+
+        if ENABLE_FB_POSTING:
+            fb_result = fb.safe_post_facebook(
+                state,
+                caption=social_text,
+                image_urls=camera_image_urls,
+                has_new_social_event=True,
+                state_path="state.json",
+            )
+            print("FB result:", fb_result)
+            posted_this = True
+
+        if posted_this:
+            posted.add(guid)
+            posted_text_hashes.add(h)
+            state["posted_guids"] = list(posted)
+            state["posted_text_hashes"] = list(posted_text_hashes)
+            save_state(state)
+            social_posted += 1
+
+    # --- Persist RSS changes ---
+    try:
+        tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
+    except Exception as e:
+        print(f"⚠️ Failed writing RSS to {RSS_PATH}: {e}")
+
+    # --- Persist final state snapshot ---
+    state["posted_guids"] = list(posted)
+    state["posted_text_hashes"] = list(posted_text_hashes)
+    save_state(state)
+
     if active_candidates == 0:
         print("Info: no active weather alerts — nothing to post.")
+
 
 if __name__ == "__main__":
     main()
