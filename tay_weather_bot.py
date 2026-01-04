@@ -765,7 +765,7 @@ def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, An
 
 # ----------------------------
 # Facebook Page posting helpers
-# ----------------------------
+# ----------------------------  
 
 def post_to_facebook_page(message: str) -> Dict[str, Any]:
     page_id = os.getenv("FB_PAGE_ID", "").strip()
@@ -867,6 +867,14 @@ def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[
 # Main
 # ----------------------------
 
+def classify_alert_kind(title: str) -> str:
+    t = (title or "").lower()
+    if "warning" in t:
+        return "warning"
+    if "watch" in t:
+        return "watch"
+    return "other"
+
 def main() -> None:
     # Clean up any previous rotated token file
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
@@ -957,91 +965,77 @@ def main() -> None:
             continue
     
         print("Social preview:", social_text.replace("\n", " "))
-    
-        token = None
-    
+
         # ================================
-        # TELEGRAM GO / NO-GO GATE
+        # TELEGRAM PREVIEW + POLICY (warnings vs watches)
         # ================================
         if TELEGRAM_ENABLE_GATE:
-            from telegram_gate import gate_or_post  # imported only when needed
-    
+            from telegram_gate import (
+                ingest_telegram_actions,
+                ensure_preview_sent,
+                decision_for,
+                is_expired,
+                warning_delay_elapsed,
+                maybe_send_reminders,
+            )
+
+            alert_kind = classify_alert_kind(title)  # "warning" | "watch" | "other"
             token = hashlib.sha1(guid.encode("utf-8")).hexdigest()[:10]
-    
+
+            # Pull in any button taps / commands from Telegram
+            ingest_telegram_actions(state, save_state)
+
+            # Optional reminder ping near expiry
+            maybe_send_reminders(state, save_state)
+
+            # Always send preview once (for both warnings and watches)
             preview_text = (
-                "🚨 ALERT READY TO POST\n"
+                f"🚨 {title}\n"
                 f"{social_text}\n\n"
-                f"Images: {len(camera_image_urls)}"
+                f"Images: {len(camera_image_urls)}\n\n"
+                f"Type: {alert_kind.upper()}"
             )
-    
-            payload = {
-                "guid": guid,
-                "social_text": social_text,
-                "image_urls": camera_image_urls,
-                "text_hash": h,
-            }
-    
-            status = gate_or_post(state, save_state, token, preview_text, payload)
-            if status != "approved":
-                print(f"Telegram gate: {status}; skipping this run.")
-                continue
-    
-        posted_anywhere = False
-    
-        if ENABLE_X_POSTING:
-            try:
-                post_to_x(social_text, image_urls=camera_image_urls)
-                posted_anywhere = True
-            except RuntimeError as e:
-                if str(e) == "X_DUPLICATE_TWEET":
-                    print("X rejected duplicate tweet text; skipping.")
-                else:
-                    raise
-    
-        if ENABLE_FB_POSTING:
-            fb_result = fb.safe_post_facebook(
-                state,
-                caption=social_text,
-                image_urls=camera_image_urls,
-                has_new_social_event=True,
-                state_path="state.json",
-            )
-            print("FB result:", fb_result)
-            if fb_result.get("ok"):
-                posted_anywhere = True
-    
-        if posted_anywhere:
-            social_posted += 1
-            posted.add(guid)
-            posted_text_hashes.add(h)
-            mark_posted(state, DISPLAY_AREA_NAME, kind="alert")
-    
-            # Optional cleanup to prevent state.json growth:
-            if TELEGRAM_ENABLE_GATE and token:
-                state.get("pending_approvals", {}).pop(token, None)
-                state.get("approval_decisions", {}).pop(token, None)
-        else:
-            print("No social posts sent for this alert.")
-    
-    # ✅ AFTER the loop
-    lbd = channel.find("lastBuildDate")
-    if lbd is None:
-        lbd = ET.SubElement(channel, "lastBuildDate")
-    lbd.text = email.utils.format_datetime(now_utc())
-    
-    trim_rss_items(channel, MAX_RSS_ITEMS)
-    tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
-    
-    state["posted_guids"] = list(posted)
-    state["posted_text_hashes"] = list(posted_text_hashes)
-    save_state(state)
-    
-    print(
-        "Run summary:",
-        f"new_rss_items_added={new_rss_items}",
-        f"social_posted={social_posted}",
-        f"social_skipped_cooldown={social_skipped_cooldown}",
-    )
+            ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind)
+
+            d = decision_for(state, token)
+
+            if alert_kind == "watch":
+                # WATCHES: must explicitly approve
+                if d == "denied":
+                    print("Telegram: denied (watch). Skipping.")
+                    continue
+                if d != "approved":
+                    if is_expired(state, token):
+                        print("Telegram: expired (watch). Skipping.")
+                        continue
+                    print("Telegram: pending (watch). Waiting for approval.")
+                    continue
+
+            elif alert_kind == "warning":
+                # WARNINGS: auto-post after delay unless denied
+                if d == "denied":
+                    print("Telegram: denied (warning). Skipping.")
+                    continue
+
+                # Wait until preview delay has elapsed (10 min)
+                if not warning_delay_elapsed(state, token):
+                    print("Telegram: warning preview delay not elapsed yet. Skipping this run.")
+                    continue
+
+            else:
+                # OTHER: require explicit approve
+                if d == "denied":
+                    print("Telegram: denied (other). Skipping.")
+                    continue
+                if d != "approved":
+                    if is_expired(state, token):
+                        print("Telegram: expired (other). Skipping.")
+                        continue
+                    print("Telegram: pending (other). Waiting for approval.")
+                    continue
+        # ================================
+        # END TELEGRAM POLICY
+        # ================================
 
 if __name__ == "__main__":
     main()
