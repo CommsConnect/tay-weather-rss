@@ -1,4 +1,5 @@
 import os
+import time
 import datetime as dt
 import requests
 from typing import Dict, Any, Optional, Callable, List
@@ -33,51 +34,7 @@ def _require_config() -> None:
         raise RuntimeError("Telegram enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing")
 
 
-def _safe_post(method: str, payload: Dict[str, Any], timeout: int = 30) -> Optional[Dict[str, Any]]:
-    """
-    Best-effort POST wrapper. Never raises.
-    Returns Telegram JSON dict on success-ish, else None.
-    """
-    try:
-        r = requests.post(_tg_api(method), json=payload, timeout=timeout)
-        # Don't raise: Telegram can return 400 for old callback queries, etc.
-        if r.status_code != 200:
-            print(f"Telegram: {method} failed {r.status_code}: {r.text}")
-            return None
-        j = r.json()
-        if not j.get("ok", False):
-            print(f"Telegram: {method} not ok: {j}")
-            return None
-        return j
-    except Exception as e:
-        print(f"Telegram: {method} exception: {e}")
-        return None
-
-
-def _safe_get(method: str, params: Dict[str, Any], timeout: int = 30) -> Optional[Dict[str, Any]]:
-    """
-    Best-effort GET wrapper. Never raises.
-    Returns Telegram JSON dict on success-ish, else None.
-    """
-    try:
-        r = requests.get(_tg_api(method), params=params, timeout=timeout)
-        if r.status_code != 200:
-            print(f"Telegram: {method} failed {r.status_code}: {r.text}")
-            return None
-        j = r.json()
-        if not j.get("ok", False):
-            print(f"Telegram: {method} not ok: {j}")
-            return None
-        return j
-    except Exception as e:
-        print(f"Telegram: {method} exception: {e}")
-        return None
-
-
-def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) -> Optional[int]:
-    """
-    Sends a message. Returns message_id (int) if available.
-    """
+def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
     _require_config()
     payload: Dict[str, Any] = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -87,40 +44,55 @@ def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) ->
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
 
-    j = _safe_post("sendMessage", payload, timeout=30)
-    if j and isinstance(j.get("result", {}).get("message_id"), int):
-        return j["result"]["message_id"]
-    return None
+    r = requests.post(_tg_api("sendMessage"), json=payload, timeout=30)
+    r.raise_for_status()
 
 
 def tg_answer_callback_query(callback_query_id: str, text: str = "") -> None:
-    """
-    Best-effort. Never raises.
-    Note: Telegram may 400 if callback query is too old/invalid.
-    """
     _require_config()
-    if not callback_query_id:
-        return
-
     payload: Dict[str, Any] = {"callback_query_id": callback_query_id}
     if text:
         payload["text"] = text
-        payload["show_alert"] = False
 
-    _safe_post("answerCallbackQuery", payload, timeout=15)
+    r = requests.post(_tg_api("answerCallbackQuery"), json=payload, timeout=30)
+    r.raise_for_status()
+
+
+def tg_answer_callback_query_safe(
+    callback_query_id: str,
+    text: str = "",
+    fallback_message: str = "",
+) -> None:
+    """
+    Best-effort callback ack.
+
+    Telegram will return HTTP 400 (e.g., QUERY_ID_INVALID) if the callback query is
+    too old / already answered. That should NOT fail the workflow.
+
+    If ack fails, we optionally send a normal message (reliable) as confirmation.
+    """
+    try:
+        tg_answer_callback_query(callback_query_id, text=text)
+    except requests.exceptions.HTTPError as e:
+        # 400 is common for stale callback queries; ignore it.
+        # (We still send a normal message as the 'real' confirmation.)
+        if fallback_message:
+            try:
+                tg_send_message(fallback_message)
+            except Exception:
+                pass
+        # Don't re-raise.
 
 
 def tg_get_updates(offset: Optional[int]) -> Dict[str, Any]:
-    """
-    Returns dict with {"ok": bool, "result": [...]}. Never raises.
-    """
     _require_config()
     params: Dict[str, Any] = {"timeout": 0}
     if offset is not None:
         params["offset"] = offset
 
-    j = _safe_get("getUpdates", params=params, timeout=30)
-    return j or {"ok": False, "result": []}
+    r = requests.get(_tg_api("getUpdates"), params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
 def tg_send_media_group(image_urls: List[str], caption: str = "") -> None:
@@ -146,23 +118,9 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> None:
         media.append(item)
 
     payload: Dict[str, Any] = {"chat_id": TELEGRAM_CHAT_ID, "media": media}
-    _safe_post("sendMediaGroup", payload, timeout=30)
 
-
-def tg_edit_message_text(message_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
-    """
-    Best-effort edit. Never raises.
-    """
-    _require_config()
-    payload: Dict[str, Any] = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "message_id": message_id,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
-    if reply_markup is not None:
-        payload["reply_markup"] = reply_markup
-    _safe_post("editMessageText", payload, timeout=30)
+    r = requests.post(_tg_api("sendMediaGroup"), json=payload, timeout=30)
+    r.raise_for_status()
 
 
 # ----------------------------
@@ -190,19 +148,14 @@ def _minutes_remaining(created_at_z: str, ttl_min: int) -> float:
 # State structure
 # ----------------------------
 def _ensure_state_defaults(state: Dict[str, Any]) -> None:
-    # token -> {
-    #   "created_at": "...Z",
-    #   "preview_text": "...",
-    #   "kind": "...",
-    #   "reminded_at": "...Z"|None,
-    #   "buttons_message_id": int|None
-    # }
+    # token -> {"created_at": "...Z", "preview_text": "...", "kind": "...", "reminded_at": "...Z"|None}
     state.setdefault("pending_approvals", {})
-
     # token -> {"decision": "approved|denied", "decided_at": "...Z"}
     state.setdefault("approval_decisions", {})
-
     state.setdefault("telegram_last_update_id", 0)
+    # last signal (handy for confirming in logs / debugging)
+    # {"token": "...", "decision": "approved|denied", "decided_at": "...Z"}
+    state.setdefault("telegram_last_signal", None)
 
 
 def _inline_keyboard(token: str) -> Dict[str, Any]:
@@ -216,58 +169,6 @@ def _inline_keyboard(token: str) -> Dict[str, Any]:
     }
 
 
-def _decision_banner(token: str, decision: str) -> str:
-    now = _utc_now_z()
-    if decision == "approved":
-        return f"✅ APPROVED\nTOKEN: {token}\nTime: {now}\n\n(This preview has been approved and will proceed.)"
-    return f"🛑 DENIED\nTOKEN: {token}\nTime: {now}\n\n(This preview has been denied and will NOT proceed.)"
-
-
-def _record_decision_and_signal(
-    state: Dict[str, Any],
-    save_fn: Callable[[Dict[str, Any]], None],
-    token: str,
-    decision: str,
-    source: str,
-    callback_query_id: Optional[str] = None,
-) -> None:
-    """
-    Records decision, signals user (toast + edit buttons message + confirmation message).
-    Never raises.
-    """
-    decision = "approved" if decision == "approved" else "denied"
-
-    state["approval_decisions"][token] = {"decision": decision, "decided_at": _utc_now_z()}
-
-    # Best-effort toast
-    if callback_query_id:
-        tg_answer_callback_query(callback_query_id, "Approved ✅" if decision == "approved" else "Denied 🛑")
-
-    # Edit the buttons message (permanent confirmation)
-    pending = (state.get("pending_approvals") or {}).get(token) or {}
-    mid = pending.get("buttons_message_id")
-    if isinstance(mid, int):
-        # Remove buttons after a decision (so it can't be clicked again)
-        tg_edit_message_text(mid, _decision_banner(token, decision), reply_markup=None)
-
-    # Send a separate confirmation message (also permanent + visible)
-    tg_send_message(
-        f"{'✅ Approved' if decision=='approved' else '🛑 Denied'} recorded.\n"
-        f"TOKEN: {token}\n"
-        f"Source: {source}\n"
-        f"Time: {_utc_now_z()}"
-    )
-
-    # Optional cleanup: remove pending record once decided (keeps state tidy)
-    if token in state.get("pending_approvals", {}):
-        try:
-            del state["pending_approvals"][token]
-        except Exception:
-            pass
-
-    save_fn(state)
-
-
 # ----------------------------
 # Public helpers your bot will call
 # ----------------------------
@@ -276,10 +177,6 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
     Reads Telegram updates and records decisions from:
       - inline buttons: go:<token>, no:<token>
       - commands: /go <token>, /nogo <token>
-
-    IMPORTANT:
-    - answerCallbackQuery is best-effort and may 400 if the query is too old.
-    - We always send permanent confirmation via edit + message.
     """
     if not _config_ok():
         return
@@ -293,6 +190,25 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
     if not data.get("ok"):
         return
 
+    def _record(token: str, decision: str, decided_at: str, cb_id: Optional[str] = None) -> None:
+        state["approval_decisions"][token] = {"decision": decision, "decided_at": decided_at}
+        state["telegram_last_signal"] = {"token": token, "decision": decision, "decided_at": decided_at}
+        # stop reminders / mark no longer pending
+        if token in state.get("pending_approvals", {}):
+            state["pending_approvals"].pop(token, None)
+
+        # This is the *reliable* confirmation the user will see
+        signal_text = f"{'✅' if decision=='approved' else '🛑'} {decision.upper()} received for TOKEN: {token}"
+
+        # Try to ack the button (may 400 if stale), but don't fail the run.
+        if cb_id:
+            tg_answer_callback_query_safe(cb_id, text=("Approved ✅" if decision == "approved" else "Denied 🛑"),
+                                          fallback_message=signal_text)
+        else:
+            tg_send_message(signal_text)
+
+        save_fn(state)
+
     for upd in data.get("result", []):
         uid = upd.get("update_id")
         if isinstance(uid, int):
@@ -301,7 +217,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
         # Inline button callback
         cb = upd.get("callback_query")
         if cb:
-            cb_id = (cb.get("id") or "").strip()
+            cb_id = cb.get("id", "")
             cb_data = (cb.get("data") or "").strip()
 
             msg = cb.get("message") or {}
@@ -312,18 +228,18 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 continue
 
             if ":" not in cb_data:
-                tg_answer_callback_query(cb_id, "Invalid action.")
+                tg_answer_callback_query_safe(cb_id, "Invalid action.")
                 continue
 
             action, token = cb_data.split(":", 1)
             token = token.strip()
 
             if action == "go":
-                _record_decision_and_signal(state, save_fn, token, "approved", source="button", callback_query_id=cb_id)
+                _record(token=token, decision="approved", decided_at=_utc_now_z(), cb_id=cb_id)
             elif action == "no":
-                _record_decision_and_signal(state, save_fn, token, "denied", source="button", callback_query_id=cb_id)
+                _record(token=token, decision="denied", decided_at=_utc_now_z(), cb_id=cb_id)
             else:
-                tg_answer_callback_query(cb_id, "Unknown action.")
+                tg_answer_callback_query_safe(cb_id, "Unknown action.")
             continue
 
         # Text commands fallback
@@ -348,7 +264,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
 
         token = parts[1].strip()
         decision = "approved" if cmd == "/go" else "denied"
-        _record_decision_and_signal(state, save_fn, token, decision, source="command", callback_query_id=None)
+        _record(token=token, decision=decision, decided_at=_utc_now_z(), cb_id=None)
 
 
 def ensure_preview_sent(
@@ -383,21 +299,19 @@ def ensure_preview_sent(
     except Exception:
         tg_send_message(album_caption)
 
-    # 2) Send buttons + token as a separate normal message (store message_id for later edits)
+    # 2) Send buttons + token as a separate normal message
     msg = (
         f"TOKEN: {token}\n\n"
         f"Tap: ✅ Approve / 🛑 Deny\n"
-        f"Or reply: /go {token} or /nogo {token}\n\n"
-        f"TTL: {TELEGRAM_APPROVAL_TTL_MIN} min"
+        f"Or reply: /go {token} or /nogo {token}"
     )
-    buttons_mid = tg_send_message(msg, reply_markup=_inline_keyboard(token))
+    tg_send_message(msg, reply_markup=_inline_keyboard(token))
 
     state["pending_approvals"][token] = {
         "created_at": _utc_now_z(),
         "preview_text": preview_text,
         "kind": kind,
         "reminded_at": None,
-        "buttons_message_id": buttons_mid,
     }
     save_fn(state)
 
@@ -458,11 +372,37 @@ def maybe_send_reminders(state: Dict[str, Any], save_fn: Callable[[Dict[str, Any
             rec["reminded_at"] = _utc_now_z()
             changed = True
             tg_send_message(
-                f"⏰ Reminder: approval still pending\n"
-                f"TOKEN: {token}\n"
-                f"~{int(max(0, remaining))} min remaining\n\n"
-                f"Tap the buttons or reply:\n/go {token}\n/nogo {token}"
+                f"⏰ Reminder: approval still pending\nTOKEN: {token}\n~{int(max(0, remaining))} min remaining\n\nReply with ✅ Approve or 🛑 Deny."
             )
 
     if changed:
         save_fn(state)
+
+
+def wait_for_decision(
+    state: Dict[str, Any],
+    save_fn: Callable[[Dict[str, Any]], None],
+    token: str,
+    max_wait_seconds: int = 600,
+    poll_interval_seconds: int = 4,
+) -> Optional[str]:
+    """
+    Polls Telegram for a decision for up to max_wait_seconds.
+    Returns: "approved", "denied", or None if still pending.
+    """
+    if not _config_ok():
+        return None
+
+    _ensure_state_defaults(state)
+
+    deadline = time.monotonic() + max(0, int(max_wait_seconds))
+    while time.monotonic() < deadline:
+        ingest_telegram_actions(state, save_fn)
+        d = decision_for(state, token)
+        if d:
+            return d
+        if is_expired(state, token):
+            return None
+        time.sleep(max(1, int(poll_interval_seconds)))
+
+    return None
