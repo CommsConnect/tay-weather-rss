@@ -55,13 +55,17 @@ from pathlib import Path
 # ----------------------------
 # Feature toggles
 # ----------------------------
-TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
-TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
+ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
+ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
+
+# Legacy single-platform test flag (optional)
+TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
 
 # ----------------------------
 # Test mode flags (from GitHub Actions)
+# - TEST_TWEET maps to TEST_X for backward compatibility
 # ----------------------------
-TEST_X = os.getenv("TEST_X", "false").lower() == "true"
+TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
 TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
 
 
