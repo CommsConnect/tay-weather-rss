@@ -68,7 +68,6 @@ TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
 TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
 TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
 
-
 # ----------------------------
 # Paths
 # ----------------------------
