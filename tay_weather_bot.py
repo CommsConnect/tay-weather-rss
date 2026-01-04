@@ -939,7 +939,28 @@ def main() -> None:
         pub_date = email.utils.format_datetime(pub_dt)
         link = MORE_INFO_URL
         description = build_rss_description_from_atom(entry)
-    
+
+        # --- Social filter: skip "ended/cancelled/no longer in effect" items ---
+        title_l = (title or "").lower()
+        summary_l = ((entry.get("summary") or "")).lower()
+
+        ended_markers = (
+            "ended",
+            "has ended",
+            "cancelled",
+            "canceled",  # just in case
+            "no longer in effect",
+            "is no longer in effect",
+            "terminated",
+            "rescinded",
+        )
+
+        if any(m in title_l for m in ended_markers) or any(m in summary_l for m in ended_markers):
+            print(f"Info: non-active alert item in feed — skipping social post: {title}")
+            posted.add(guid)  # prevents re-checking every run
+            continue
+
+        
         if not rss_item_exists(channel, guid):
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
             new_rss_items += 1
