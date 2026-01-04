@@ -596,9 +596,9 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
     # ------------------------------------------------------------
     # Tuning knobs (easy to tweak)
     # ------------------------------------------------------------
-    BUG_RELATIVE_WIDTH = 0.10   # was 0.18 → smaller (13% of image width)
-    BUG_MIN_WIDTH_PX   = 45     # was 120 → smaller minimum
-    BUG_OPACITY_ALPHA  = 140    # 0–255 (140 ≈ ~55% opacity)
+    BUG_RELATIVE_WIDTH = 0.07   # was 0.18 → smaller (13% of image width)
+    BUG_MIN_WIDTH_PX   = 35     # was 120 → smaller minimum
+    BUG_OPACITY_ALPHA  = 80    # 0–255 (140 ≈ ~55% opacity)
     BUG_PAD_RELATIVE   = 0.015  # padding relative to image width
 
     try:
