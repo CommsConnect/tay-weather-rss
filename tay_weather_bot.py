@@ -890,90 +890,90 @@ def main() -> None:
     # - Posts only to the platforms you selected in workflow_dispatch
     # ----------------------------
     if TEST_X or TEST_FACEBOOK:
-    base = "Testing the validity of the post — please ignore ✅"
-
-    # Optional Telegram gate for test runs too.
-    # - First test run sends a Telegram preview with Approve/Deny buttons and exits.
-    # - After you approve, re-run the workflow_dispatch test and the bot will post.
-    if TELEGRAM_ENABLE_GATE:
-        from telegram_gate import (
-            ingest_telegram_actions,
-            ensure_preview_sent,
-            decision_for,
-            is_expired,
-            maybe_send_reminders,
-        )
-
-        st = load_state()
-        ingest_telegram_actions(st, save_state)
-        maybe_send_reminders(st, save_state)
-
-        # Reuse the same token across reruns until it is decided or expires.
-        token = (st.get("test_gate_token") or "").strip()
-        created_at = None
-        if token:
-            created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
-
-        if (
-            not token
-            or (created_at and is_expired(st, token))
-            or (token and decision_for(st, token) in ("approved", "denied"))
-        ):
-            token = hashlib.sha1(f"test:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
-            st["test_gate_token"] = token
-            save_state(st)
-
-        preview_text = (
-            f"{base}\n\n"
-            f"Platforms: "
-            f"{'X' if (ENABLE_X_POSTING and TEST_X) else ''}"
-            f"{' + ' if (ENABLE_X_POSTING and TEST_X and ENABLE_FB_POSTING and TEST_FACEBOOK) else ''}"
-            f"{'Facebook' if (ENABLE_FB_POSTING and TEST_FACEBOOK) else ''}\n\n"
-            f"If you approve, re-run the workflow and the test post will publish.\n\n"
-            f"TOKEN: {token}"
-        )
-
-        ensure_preview_sent(
-            st,
-            save_state,
-            token,
-            preview_text,
-            kind="other",  # tests always require explicit approval
-            image_urls=camera_image_urls,
-        )
-
-        d = decision_for(st, token)
-        if d == "denied":
-            print("Telegram: denied (test). Skipping test posts.")
-            return
-        if d != "approved":
-            if is_expired(st, token):
-                print("Telegram: expired (test). Skipping test posts.")
+        base = "Testing the validity of the post — please ignore ✅"
+    
+        # Optional Telegram gate for test runs too.
+        # - First test run sends a Telegram preview with Approve/Deny buttons and exits.
+        # - After you approve, re-run the workflow_dispatch test and the bot will post.
+        if TELEGRAM_ENABLE_GATE:
+            from telegram_gate import (
+                ingest_telegram_actions,
+                ensure_preview_sent,
+                decision_for,
+                is_expired,
+                maybe_send_reminders,
+            )
+    
+            st = load_state()
+            ingest_telegram_actions(st, save_state)
+            maybe_send_reminders(st, save_state)
+    
+            # Reuse the same token across reruns until it is decided or expires.
+            token = (st.get("test_gate_token") or "").strip()
+            created_at = None
+            if token:
+                created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
+    
+            if (
+                not token
+                or (created_at and is_expired(st, token))
+                or (token and decision_for(st, token) in ("approved", "denied"))
+            ):
+                token = hashlib.sha1(f"test:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
+                st["test_gate_token"] = token
+                save_state(st)
+    
+            preview_text = (
+                f"{base}\n\n"
+                f"Platforms: "
+                f"{'X' if (ENABLE_X_POSTING and TEST_X) else ''}"
+                f"{' + ' if (ENABLE_X_POSTING and TEST_X and ENABLE_FB_POSTING and TEST_FACEBOOK) else ''}"
+                f"{'Facebook' if (ENABLE_FB_POSTING and TEST_FACEBOOK) else ''}\n\n"
+                f"If you approve, re-run the workflow and the test post will publish.\n\n"
+                f"TOKEN: {token}"
+            )
+    
+            ensure_preview_sent(
+                st,
+                save_state,
+                token,
+                preview_text,
+                kind="other",  # tests always require explicit approval
+                image_urls=camera_image_urls,
+            )
+    
+            d = decision_for(st, token)
+            if d == "denied":
+                print("Telegram: denied (test). Skipping test posts.")
                 return
-            print("Telegram: pending (test). Waiting for approval.")
-            return
-
-    if ENABLE_X_POSTING and TEST_X:
-        post_to_x(f"{base}\n\n(X)", image_urls=camera_image_urls)
-
-    if ENABLE_FB_POSTING and TEST_FACEBOOK:
-        fb_state = load_state()
-        # Tests should actually hit Facebook even if you recently posted.
-        # Clear cooldown markers for this single run.
-        fb_state.pop("fb_cooldown_until", None)
-        fb_state.pop("fb_last_posted_at", None)
-
-        fb_result = fb.safe_post_facebook(
-            fb_state,
-            caption=f"{base}\n\n(Facebook)",
-            image_urls=camera_image_urls,
-            # In test mode we *want* an actual post even though there is no "new alert".
-            has_new_social_event=True,
-            state_path="state.json",
-        )
-        print("FB result:", fb_result)
-
-    return  # ✅ IMPORTANT: only return during test mode
+            if d != "approved":
+                if is_expired(st, token):
+                    print("Telegram: expired (test). Skipping test posts.")
+                    return
+                print("Telegram: pending (test). Waiting for approval.")
+                return
+    
+        if ENABLE_X_POSTING and TEST_X:
+            post_to_x(f"{base}\n\n(X)", image_urls=camera_image_urls)
+    
+        if ENABLE_FB_POSTING and TEST_FACEBOOK:
+            fb_state = load_state()
+            # Tests should actually hit Facebook even if you recently posted.
+            # Clear cooldown markers for this single run.
+            fb_state.pop("fb_cooldown_until", None)
+            fb_state.pop("fb_last_posted_at", None)
+    
+            fb_result = fb.safe_post_facebook(
+                fb_state,
+                caption=f"{base}\n\n(Facebook)",
+                image_urls=camera_image_urls,
+                # In test mode we *want* an actual post even though there is no "new alert".
+                has_new_social_event=True,
+                state_path="state.json",
+            )
+            print("FB result:", fb_result)
+    
+        return  # ✅ IMPORTANT: only return during test mode
 
     # ----------------------------
     # Normal mode (process real alerts)
