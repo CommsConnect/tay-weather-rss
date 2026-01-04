@@ -51,12 +51,12 @@ import facebook_poster as fb
 from requests_oauthlib import OAuth1
 from pathlib import Path
 
-
 # ----------------------------
 # Feature toggles
 # ----------------------------
 ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
 ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
+TELEGRAM_ENABLE_GATE = os.getenv("TELEGRAM_ENABLE_GATE", "true").lower() == "true"
 
 # Legacy single-platform test flag (optional)
 TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
@@ -906,56 +906,88 @@ def main() -> None:
     state = load_state()
     posted = set(state.get("posted_guids", []))
     posted_text_hashes = set(state.get("posted_text_hashes", []))
-
+    
     tree, channel = load_rss_tree()
-
+    
     new_rss_items = 0
     social_posted = 0
     social_skipped_cooldown = 0
-
+    
     try:
         atom_entries = fetch_atom_entries(ALERT_FEED_URL)
     except Exception as e:
         print(f"⚠️ ATOM feed unavailable: {e}")
         print("Exiting cleanly; will retry on next scheduled run.")
         return
-
+    
     for entry in atom_entries:
         guid = atom_entry_guid(entry)
         if not guid:
             continue
-
+    
+        # --- RSS item build/write (keep this) ---
         title = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
         pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
         pub_date = email.utils.format_datetime(pub_dt)
         link = MORE_INFO_URL
         description = build_rss_description_from_atom(entry)
-
+    
         if not rss_item_exists(channel, guid):
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
             new_rss_items += 1
-
+    
+        # --- Dedupe: already posted this guid ---
         if guid in posted:
             continue
-
+    
+        # --- Cooldown gate (keep this) ---
         allowed, reason = cooldown_allows_post(state, DISPLAY_AREA_NAME, kind="alert")
         if not allowed:
             social_skipped_cooldown += 1
             print("Social skipped:", reason)
             continue
-
+    
+        # --- Build social text + dedupe by text ---
         social_text = build_social_text_from_atom(entry)
         h = text_hash(social_text)
-
+    
         if h in posted_text_hashes:
             print("Social skipped: duplicate text hash already posted")
             posted.add(guid)
             continue
-
+    
         print("Social preview:", social_text.replace("\n", " "))
-
+    
+        token = None
+    
+        # ================================
+        # TELEGRAM GO / NO-GO GATE
+        # ================================
+        if TELEGRAM_ENABLE_GATE:
+            from telegram_gate import gate_or_post  # imported only when needed
+    
+            token = hashlib.sha1(guid.encode("utf-8")).hexdigest()[:10]
+    
+            preview_text = (
+                "🚨 ALERT READY TO POST\n"
+                f"{social_text}\n\n"
+                f"Images: {len(camera_image_urls)}"
+            )
+    
+            payload = {
+                "guid": guid,
+                "social_text": social_text,
+                "image_urls": camera_image_urls,
+                "text_hash": h,
+            }
+    
+            status = gate_or_post(state, save_state, token, preview_text, payload)
+            if status != "approved":
+                print(f"Telegram gate: {status}; skipping this run.")
+                continue
+    
         posted_anywhere = False
-
+    
         if ENABLE_X_POSTING:
             try:
                 post_to_x(social_text, image_urls=camera_image_urls)
@@ -965,7 +997,7 @@ def main() -> None:
                     print("X rejected duplicate tweet text; skipping.")
                 else:
                     raise
-
+    
         if ENABLE_FB_POSTING:
             fb_result = fb.safe_post_facebook(
                 state,
@@ -977,34 +1009,39 @@ def main() -> None:
             print("FB result:", fb_result)
             if fb_result.get("ok"):
                 posted_anywhere = True
-
+    
         if posted_anywhere:
             social_posted += 1
             posted.add(guid)
             posted_text_hashes.add(h)
             mark_posted(state, DISPLAY_AREA_NAME, kind="alert")
+    
+            # Optional cleanup to prevent state.json growth:
+            if TELEGRAM_ENABLE_GATE and token:
+                state.get("pending_approvals", {}).pop(token, None)
+                state.get("approval_decisions", {}).pop(token, None)
         else:
             print("No social posts sent for this alert.")
-
+    
+    # ✅ AFTER the loop
     lbd = channel.find("lastBuildDate")
     if lbd is None:
         lbd = ET.SubElement(channel, "lastBuildDate")
     lbd.text = email.utils.format_datetime(now_utc())
-
+    
     trim_rss_items(channel, MAX_RSS_ITEMS)
     tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
-
+    
     state["posted_guids"] = list(posted)
     state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
-
+    
     print(
         "Run summary:",
         f"new_rss_items_added={new_rss_items}",
         f"social_posted={social_posted}",
         f"social_skipped_cooldown={social_skipped_cooldown}",
     )
-
 
 if __name__ == "__main__":
     main()
