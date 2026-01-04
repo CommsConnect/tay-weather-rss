@@ -1,32 +1,13 @@
 {
-  "approval_decisions": {
-    "4539eb96b8": {
-      "decided_at": "2026-01-04T21:30:28Z",
-      "decision": "approved"
-    },
-    "42f5cba59f": {
-      "decision": "approved",
-      "decided_at": "2026-01-04T22:43:58Z"
-    }
-  },
-  "cooldowns": {},
-  "fb_cooldown_until": "2026-01-04T22:30:34.202201Z",
-  "fb_last_posted_at": "2026-01-04T21:30:34.202201Z",
-  "global_last_post_ts": 0,
-  "pending_approvals": {},
-  "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
-    "tag:weather.gc.ca,2013-04-16:20260103143011"
-  ],
-  "posted_text_hashes": [
-    "fbed745e72e1bb04d2a94c73a4dc5ffd70a0eece"
-  ],
   "seen_ids": [],
-  "telegram_last_signal": {
-    "token": "42f5cba59f",
-    "decision": "approved",
-    "decided_at": "2026-01-04T22:43:58Z"
-  },
-  "telegram_last_update_id": 259933319,
-  "test_gate_token": "4539eb96b8"
+  "posted_guids": [],
+  "posted_text_hashes": [],
+  "cooldowns": {},
+  "global_last_post_ts": 0,
+
+  "pending_approvals": {},
+  "approval_decisions": {},
+  "telegram_last_update_id": 0,
+  "telegram_last_signal": null,
+  "test_gate_token": ""
 }
