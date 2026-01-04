@@ -1018,11 +1018,19 @@ def main() -> None:
             preview_text = (
                 f"🚨 {title}\n\n"
                 f"{social_text}\n\n"
-                f"Images: {len(camera_image_urls)}\n"
                 f"Alert type: {alert_kind.upper()}\n\n"
                 f"More information:\n{MORE_INFO_URL}"
             )
-            ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind)
+            
+            ensure_preview_sent(
+                state,
+                save_state,
+                token,
+                preview_text,
+                kind=alert_kind,
+                image_urls=camera_image_urls,
+            )
+
 
             d = decision_for(state, token)
 
