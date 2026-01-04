@@ -1,12 +1,27 @@
 # tay_weather_bot.py
 #
-# Tay Township Weather Bot
-# - Pulls Environment Canada alerts from regional ATOM feed (source of truth)
-# - Writes RSS feed: tay-weather.xml
-# - Posts to X automatically (OAuth 2.0 refresh token)
-# - Uploads media to X via OAuth 1.0a user context (required for media upload)
-# - Posts to Facebook Page automatically (Page access token), supports photo carousels
-# - Supports cooldowns + dedupe
+# Tay Township Weather Bot (Final "F" style)
+#
+# PURPOSE
+#   - Reads Environment Canada ATOM alert feed (source of truth)
+#   - Writes an RSS file (tay-weather.xml) for your site/consumers
+#   - Posts to X (Twitter) and Facebook when enabled
+#   - Uses Telegram as an approval gate / preview channel
+#   - Chooses images in this order:
+#       (1) Google Drive folder (your curated photos)  ✅ FIRST
+#       (2) Ontario 511 highway cameras (CR-29)        ✅ FALLBACK
+#       BUT:
+#         - If the alert is a WIND WARNING, do NOT use highway camera images
+#           (so a "wind warning" won’t show winter-road cameras)
+#
+# CARE STATEMENTS (Facebook only)
+#   - X should be clean/short and NOT include the care statement.
+#   - Facebook SHOULD append a care statement pulled from the Google Sheet
+#     tab: "CareStatements"
+#
+# MORE LINK RULE
+#   - Always prefer TAY_ALERTS_URL first
+#   - If TAY_ALERTS_URL is missing or unreachable, fall back to TAY_COORDS_URL
 #
 # REQUIRED GitHub Secrets (X OAuth 2.0 posting):
 #   X_CLIENT_ID
@@ -23,16 +38,25 @@
 #   FB_PAGE_ID
 #   FB_PAGE_ACCESS_TOKEN
 #
+# OPTIONAL GitHub Secrets (Google Sheet + Drive for care statements + curated photos):
+#   GOOGLE_SHEET_ID
+#   GOOGLE_SERVICE_ACCOUNT_JSON
+#   GOOGLE_DRIVE_FOLDER_ID
+#
 # OPTIONAL workflow env vars:
 #   ENABLE_X_POSTING=true|false
 #   ENABLE_FB_POSTING=true|false
-#   TEST_TWEET=true
+#   TEST_X=true|false
+#   TEST_FACEBOOK=true|false
 #   ALERT_FEED_URL=<ATOM feed url>
-#   TAY_COORDS_URL=<coords link>
-#   TAY_ALERTS_URL=<preferred tay alerts link>   <-- (you already set this in workflow)
+#   TAY_ALERTS_URL=<preferred public "More" URL>
+#   TAY_COORDS_URL=<fallback coords link>
 #   CR29_NORTH_IMAGE_URL=<direct image url OR https://511on.ca/map/Cctv/<id>>
 #   CR29_SOUTH_IMAGE_URL=<direct image url OR https://511on.ca/map/Cctv/<id>>
 #   ON511_CAMERA_KEYWORD=<default: CR-29>
+#   TELEGRAM_ENABLE_GATE=true|false
+#   TELEGRAM_PREVIEW_DELAY_MIN=<minutes before WARNING auto-posts unless denied>
+#   TELEGRAM_WAIT_SECONDS=<max seconds to wait for approval on WATCH/OTHER>
 #
 import base64
 import datetime as dt
@@ -43,14 +67,18 @@ import os
 import re
 import time
 import xml.etree.ElementTree as ET
+from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from bs4 import BeautifulSoup
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 from PIL import Image
-from io import BytesIO
-import facebook_poster as fb
 from requests_oauthlib import OAuth1
-from pathlib import Path
+
+import facebook_poster as fb
 from telegram_gate import (
     ingest_telegram_actions,
     maybe_send_reminders,
@@ -61,85 +89,67 @@ from telegram_gate import (
     wait_for_decision,
 )
 
-from bs4 import BeautifulSoup
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
-
-# ----------------------------
-# Feature toggles
-# ----------------------------
+# =============================================================================
+# Feature toggles (controlled by GitHub Actions env)
+# =============================================================================
 ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
 ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
 TELEGRAM_ENABLE_GATE = os.getenv("TELEGRAM_ENABLE_GATE", "true").lower() == "true"
 
-# Legacy single-platform test flag (optional)
+# Legacy compatibility: TEST_TWEET implies X test
 TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
 
-# ----------------------------
-# Test mode flags (from GitHub Actions)
-# - TEST_TWEET maps to TEST_X for backward compatibility
-# ----------------------------
+# Per-platform test mode (workflow_dispatch inputs set these)
 TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
 TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
 
-# ----------------------------
-# Paths
-# ----------------------------
+# =============================================================================
+# Paths (repo workspace)
+# =============================================================================
 STATE_PATH = "state.json"
 RSS_PATH = "tay-weather.xml"
 ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
 
 USER_AGENT = "tay-weather-rss-bot/1.1"
 
-# Public URLs (preferred: TAY_ALERTS_URL, fallback: TAY_COORDS_URL)
-TAY_COORDS_URL = os.getenv(
-    "TAY_COORDS_URL",
-    "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
-).strip()
-TAY_ALERTS_URL = (os.getenv("TAY_ALERTS_URL") or "").strip()
-
+# =============================================================================
+# URLs and feed settings
+# =============================================================================
 ALERT_FEED_URL = os.getenv("ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml").strip()
 DISPLAY_AREA_NAME = "Tay Township area"
 
-# Ontario 511 cameras API
+# Public URLs:
+# - TAY_ALERTS_URL is your preferred "More" page (your GitHub pages /tay/).
+# - TAY_COORDS_URL is the fallback official coords URL.
+TAY_ALERTS_URL = (os.getenv("TAY_ALERTS_URL") or "").strip()
+TAY_COORDS_URL = (os.getenv("TAY_COORDS_URL") or "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768").strip()
+
+# =============================================================================
+# Ontario 511 camera resolver settings
+# =============================================================================
 ON511_CAMERAS_API = "https://511on.ca/api/v2/get/cameras"
 ON511_CAMERA_KEYWORD = os.getenv("ON511_CAMERA_KEYWORD", "CR-29").strip() or "CR-29"
 
-
-# ----------------------------
-# Severity emoji
-# ----------------------------
-def severity_emoji(title: str) -> str:
-    """Advisory=🟡, Watch=🟠, Warning=🔴, other=⚪"""
-    t = (title or "").lower()
-    if "warning" in t:
-        return "🔴"
-    if "watch" in t:
-        return "🟠"
-    if "advisory" in t:
-        return "🟡"
-    return "⚪"
-
-
-# ----------------------------
+# =============================================================================
 # Cooldown policy
-# ----------------------------
+# =============================================================================
+# NOTE: This is your "anti-spam" policy.
+# - We still dedupe by GUID and by text hash.
+# - This cooldown prevents re-posting too frequently even if EC changes small text.
 COOLDOWN_MINUTES = {
     "warning": 60,
     "watch": 120,
     "advisory": 180,
     "statement": 240,
-    "alert": 180,
-    "allclear": 60,
+    "other": 180,
     "default": 180,
 }
 GLOBAL_COOLDOWN_MINUTES = 5
 
 
-# ----------------------------
-# Generic helpers
-# ----------------------------
+# =============================================================================
+# Helper: normalize text for stable comparisons
+# =============================================================================
 def normalize(s: str) -> str:
     if not s:
         return ""
@@ -147,10 +157,6 @@ def normalize(s: str) -> str:
     s = s.replace("–", "-").replace("—", "-")
     s = re.sub(r"\s+", " ", s).strip()
     return s
-
-
-def now_utc() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
 
 
 def safe_int(x: Any, default: int) -> int:
@@ -164,7 +170,50 @@ def text_hash(s: str) -> str:
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
 
 
+# =============================================================================
+# Severity emoji
+# =============================================================================
+def severity_emoji(title: str) -> str:
+    """
+    Advisory = 🟡
+    Watch    = 🟠
+    Warning  = 🔴
+    Other    = ⚪
+    """
+    t = (title or "").lower()
+    if "warning" in t:
+        return "🔴"
+    if "watch" in t:
+        return "🟠"
+    if "advisory" in t:
+        return "🟡"
+    return "⚪"
+
+
+def classify_alert_kind(title: str) -> str:
+    """
+    Used for cooldown bucket AND Telegram gate policy.
+    """
+    t = (title or "").lower()
+    if "warning" in t:
+        return "warning"
+    if "watch" in t:
+        return "watch"
+    if "advisory" in t:
+        return "advisory"
+    if "statement" in t:
+        return "statement"
+    return "other"
+
+
+# =============================================================================
+# State file (dedupe/cooldowns/telegram gate memory)
+# =============================================================================
 def load_state() -> dict:
+    """
+    This is the only file that makes the bot remember what it has done.
+    If you reset this file, the bot behaves like it's the first run again.
+    """
     default = {
         "seen_ids": [],
         "posted_guids": [],
@@ -187,21 +236,21 @@ def load_state() -> dict:
         raw = open(STATE_PATH, "r", encoding="utf-8").read().strip()
         if not raw:
             return default
-
         data = json.loads(raw)
         if not isinstance(data, dict):
             return default
     except Exception:
         return default
 
-    # Ensure required keys always exist
     for k, v in default.items():
         data.setdefault(k, v)
-
     return data
 
 
 def save_state(state: dict) -> None:
+    """
+    Save state and cap growth so it doesn't grow forever.
+    """
     state["seen_ids"] = state.get("seen_ids", [])[-5000:]
     state["posted_guids"] = state.get("posted_guids", [])[-5000:]
     state["posted_text_hashes"] = state.get("posted_text_hashes", [])[-5000:]
@@ -215,69 +264,77 @@ def save_state(state: dict) -> None:
         json.dump(state, f, indent=2)
 
 
+# =============================================================================
+# Cooldown logic
+# =============================================================================
+def group_key_for_cooldown(area_name: str, kind: str) -> str:
+    raw = f"{normalize(area_name)}|{normalize(kind)}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def cooldown_allows_post(state: Dict[str, Any], area_name: str, kind: str) -> Tuple[bool, str]:
+    """
+    Returns (allowed, reason)
+    """
+    now_ts = int(time.time())
+
+    last_global = safe_int(state.get("global_last_post_ts", 0), 0)
+    if last_global and (now_ts - last_global) < (GLOBAL_COOLDOWN_MINUTES * 60):
+        return False, f"Global cooldown active ({GLOBAL_COOLDOWN_MINUTES}m)."
+
+    key = group_key_for_cooldown(area_name, kind)
+    cooldowns = state.get("cooldowns", {}) if isinstance(state.get("cooldowns"), dict) else {}
+    last_ts = safe_int(cooldowns.get(key, 0), 0)
+
+    mins = COOLDOWN_MINUTES.get(kind, COOLDOWN_MINUTES["default"])
+    if last_ts and (now_ts - last_ts) < (mins * 60):
+        return False, f"Cooldown active for group ({mins}m)."
+
+    return True, "OK"
+
+
+def mark_posted(state: Dict[str, Any], area_name: str, kind: str) -> None:
+    now_ts = int(time.time())
+    key = group_key_for_cooldown(area_name, kind)
+    state.setdefault("cooldowns", {})
+    state["cooldowns"][key] = now_ts
+    state["global_last_post_ts"] = now_ts
+
+
+# =============================================================================
+# "More:" URL resolver
+#   - Prefer TAY_ALERTS_URL
+#   - Fall back to TAY_COORDS_URL if missing or unreachable
+# =============================================================================
 def _url_looks_ok(url: str) -> bool:
-    """
-    Lightweight check:
-    - must be http(s)
-    - HEAD/GET returns < 400
-    """
     url = (url or "").strip()
-    if not url.lower().startswith(("http://", "https://")):
+    if not url:
         return False
     try:
-        r = requests.head(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 12))
-        if r.status_code and r.status_code < 400:
+        r = requests.head(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
+        if r.status_code < 400:
             return True
     except Exception:
         pass
     try:
-        r = requests.get(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 12))
+        r = requests.get(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
         return r.status_code < 400
     except Exception:
         return False
 
 
-def get_more_info_url() -> str:
+def resolve_more_info_url() -> str:
     """
-    Your rule:
-      - Choose TAY_ALERTS_URL first
-      - Fall back to TAY_COORDS_URL if something is wrong
+    This ensures your posts always use your desired URL when it works.
     """
     if TAY_ALERTS_URL and _url_looks_ok(TAY_ALERTS_URL):
         return TAY_ALERTS_URL
     return TAY_COORDS_URL
 
 
-def materialize_images_for_facebook(image_urls: List[str]) -> List[str]:
-    """
-    Facebook path: force our downloader/bug overlay to run by converting remote URLs
-    into local temp files (non-URL refs). Your fb module only uses fb.load_image_bytes
-    for non-URL inputs.
-    Returns list of local file paths.
-    """
-    out_paths: List[str] = []
-    for i, u in enumerate([x for x in (image_urls or []) if (x or "").strip()][:10]):
-        b, mt = download_image_bytes(u)  # <-- applies bug overlay for 511 URLs
-        ext = "png" if mt == "image/png" else "jpg"
-        p = f"/tmp/tay_cam_{i}.{ext}"
-        with open(p, "wb") as f:
-            f.write(b)
-        out_paths.append(p)
-    return out_paths
-
-
-def cleanup_tmp_cam_files(paths: List[str]) -> None:
-    for p in paths or []:
-        try:
-            if isinstance(p, str) and p.startswith("/tmp/tay_cam_"):
-                os.remove(p)
-        except Exception:
-            pass
-
-
-# ----------------------------
-# ATOM helpers
-# ----------------------------
+# =============================================================================
+# ATOM feed parsing
+# =============================================================================
 ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
 
 
@@ -287,12 +344,10 @@ def _parse_atom_dt(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def fetch_atom_entries(
-    feed_url: str,
-    retries: int = 3,
-    timeout: Tuple[int, int] = (5, 20),
-) -> List[Dict[str, Any]]:
-    """Fetch and parse an ATOM feed. Returns entries newest-first."""
+def fetch_atom_entries(feed_url: str, retries: int = 3, timeout: Tuple[int, int] = (5, 20)) -> List[Dict[str, Any]]:
+    """
+    Fetch EC ATOM feed. Returns entries newest-first.
+    """
     last_err: Optional[Exception] = None
     for attempt in range(retries):
         try:
@@ -340,6 +395,9 @@ def fetch_atom_entries(
 
 
 def atom_title_for_tay(title: str) -> str:
+    """
+    Convert EC region naming to your local naming.
+    """
     if not title:
         return title
     t = title.replace(", Midland - Coldwater - Orr Lake", f" ({DISPLAY_AREA_NAME})")
@@ -351,149 +409,19 @@ def atom_entry_guid(entry: Dict[str, Any]) -> str:
     return (entry.get("id") or entry.get("link") or entry.get("title") or "").strip()
 
 
-def _sheet_service():
-    sheet_id = (os.getenv("GOOGLE_SHEET_ID") or "").strip()
-    sa_json = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
-    if not sheet_id or not sa_json:
-        return None, None
-
-    info = json.loads(sa_json)
-    creds = service_account.Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    )
-    svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
-    return svc, sheet_id
-
-
-def load_care_statements_rows() -> list[dict]:
-    """
-    Reads CareStatements tab. Expected columns (header row):
-      enabled, colour, type, text
-    'colour' should match the emoji colour bucket: 🔴 🟠 🟡 ⚪ (or can be blank for any)
-    'type' should match the alert type text, e.g. 'Special weather statement' (or blank for any)
-    """
-    svc, sheet_id = _sheet_service()
-    if not svc:
-        return []
-
-    rng = "CareStatements!A:Z"
-    resp = svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
-    values = resp.get("values", [])
-    if not values or len(values) < 2:
-        return []
-
-    headers = [h.strip().lower() for h in values[0]]
-    rows = []
-    for v in values[1:]:
-        row = {
-            headers[i]: (
-                v[i].strip()
-                if i < len(v) and isinstance(v[i], str)
-                else (v[i] if i < len(v) else "")
-            )
-            for i in range(len(headers))
-        }
-        rows.append(row)
-    return rows
-
-
-def pick_care_statement(care_rows: list[dict], colour: str, alert_type: str) -> str:
-    """
-    Precedence (best -> fallback):
-      enabled + exact colour + exact type
-      enabled + any colour + exact type
-      enabled + exact colour + any type
-      enabled + any colour + any type
-    """
-    def enabled(r):
-        return str(r.get("enabled", "")).strip().lower() in ("true", "yes", "1", "y")
-
-    alert_type_l = (alert_type or "").strip().lower()
-    colour_l = (colour or "").strip()
-
-    def matches(r, want_colour, want_type):
-        rc = (r.get("colour") or "").strip()
-        rt = (r.get("type") or "").strip().lower()
-        if want_colour and rc != want_colour:
-            return False
-        if want_type and rt != want_type:
-            return False
-        return True
-
-    def norm_colour(c: str) -> str:
-        c = (c or "").strip().lower()
-        if c in ("🔴", "red", "warning"): return "🔴"
-        if c in ("🟠", "orange", "watch"): return "🟠"
-        if c in ("🟡", "yellow", "advisory"): return "🟡"
-        if c in ("⚪", "white", "other", "statement"): return "⚪"
-        return (c or "").strip()
-
-    colour_n = norm_colour(colour_l)
-
-    buckets = [
-        (colour_n, alert_type_l),
-        ("", alert_type_l),
-        (colour_n, ""),
-        ("", ""),
-    ]
-
-    for bc, bt in buckets:
-        for r in care_rows:
-            if not enabled(r):
-                continue
-            if matches(r, bc, bt):
-                txt = (r.get("text") or "").strip()
-                if txt:
-                    return txt
-
-    return ""
-
-
-def _pretty_title_for_social(title: str) -> str:
-    """
-    Convert 'Snow Squall Warning (Tay Township area)' -> 'Snow Squall Warning in Tay Township'
-    """
-    t = (title or "").strip()
-    t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
-    return f"{t} in Tay Township"
-
-
-def _issued_short(issued: str) -> str:
-    """
-    Convert 'Issued: 5:07 PM EST Sunday 4 January 2026'
-    -> 'Issued Jan 4 5:07p'
-    Fallback: return original issued if parsing fails.
-    """
-    s = (issued or "").strip()
-    s2 = re.sub(r"^Issued:\s*", "", s, flags=re.IGNORECASE).strip()
-
-    m = re.search(
-        r"(?P<h>\d{1,2}):(?P<min>\d{2})\s*(?P<ampm>AM|PM)\b.*?\b(?P<day>\d{1,2})\s+(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)\s+(?P<year>\d{4})",
-        s2,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return s  # fallback
-
-    h = int(m.group("h"))
-    minute = m.group("min")
-    ampm = m.group("ampm").lower()
-    day = int(m.group("day"))
-    month = m.group("month").strip().capitalize()[:3]
-
-    suffix = "a" if ampm.startswith("a") else "p"
-    return f"Issued {month} {day} {h}:{minute}{suffix}"
-
-
+# =============================================================================
+# Environment Canada detail extraction
+#   Goal:
+#     For social posts, we want clean human-friendly lines.
+#
+#   Primary attempt:
+#     - Extract What: ...
+#     - Extract When: ...
+#
+#   Fallback:
+#     - Pull first meaningful weather sentence from the page
+# =============================================================================
 def _extract_details_lines_from_ec(official_url: str) -> List[str]:
-    """
-    Prefer What/When blocks, but return clean detail lines with no labels.
-    Output lines like:
-      ['Additional local snowfall amounts up to 30 cm.',
-       'Continuing tonight. Weakening on Saturday morning.']
-    Falls back to 1 meaningful weather sentence if no What/When found.
-    """
     official_url = (official_url or "").strip()
     if not official_url:
         return []
@@ -507,6 +435,7 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
     lines = [ln for ln in lines if ln]
     text = " ".join(lines)
 
+    # Try What/When blocks first (most structured)
     m_what = re.search(r"What:\s*(.+?)(?=\s+(When:|Where:|Additional information:))", text, re.IGNORECASE)
     m_when = re.search(r"When:\s*(.+?)(?=\s+(Where:|Additional information:)|$)", text, re.IGNORECASE)
 
@@ -521,231 +450,298 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             out.append(when.rstrip(".") + ".")
 
     if out:
-        return out[:2]
+        return out[:2]  # X wants 1–2 clean lines
 
+    # Fallback: first meaningful weather-ish sentence
     weather_keywords = (
         "snow", "snowfall", "squall", "rain", "freezing", "ice", "wind", "fog",
         "visibility", "blowing", "drifting", "thunder", "heat", "cold"
     )
     sentences = re.split(r"(?<=[.!?])\s+", text)
-    for s in sentences[:120]:
+    for s in sentences[:140]:
         s = s.strip()
-        if 25 <= len(s) <= 220 and any(k in s.lower() for k in weather_keywords):
+        if 25 <= len(s) <= 240 and any(k in s.lower() for k in weather_keywords):
+            # Avoid boilerplate
+            sl = s.lower()
+            if "environment canada" in sl or "continue to monitor" in sl:
+                continue
             return [s.rstrip(".") + "."]
     return []
 
 
-def build_x_post_text(entry: Dict[str, Any], care: str = "") -> str:
-    title_raw = atom_title_for_tay((entry.get("title") or "").strip())
-    issued_raw = (entry.get("summary") or "").strip()
-    official = (entry.get("link") or "").strip()
+# =============================================================================
+# Google Sheet + Google Drive integration
+#   - CareStatements tab (Facebook only)
+#   - Optional MediaRules tab (if you ever add it)
+#     If MediaRules is empty/missing -> we still use Drive photos in a simple default way.
+# =============================================================================
+def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
+    """
+    Returns (sheets_service, drive_service, sheet_id, drive_folder_id).
+    If missing creds, returns (None, None, "", "").
+    """
+    sheet_id = (os.getenv("GOOGLE_SHEET_ID") or "").strip()
+    sa_json = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
+    drive_folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
 
-    sev = severity_emoji(title_raw)
-    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
+    if not sheet_id or not sa_json:
+        return None, None, "", drive_folder_id
 
-    details_lines: List[str] = []
-    try:
-        details_lines = _extract_details_lines_from_ec(official)
-    except Exception as e:
-        print(f"⚠️ EC details parse failed (X): {e}")
-        details_lines = []
+    info = json.loads(sa_json)
+    creds = service_account.Credentials.from_service_account_info(
+        info,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            # Drive readonly is needed to list/download Drive photos
+            "https://www.googleapis.com/auth/drive.readonly",
+        ],
+    )
 
-    issued_short = _issued_short(issued_raw)
-    more_url = get_more_info_url()
+    sheets_svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    drive_svc = build("drive", "v3", credentials=creds, cache_discovery=False)
+    return sheets_svc, drive_svc, sheet_id, drive_folder_id
 
-    parts: List[str] = []
-    parts.append(title_line)
-    parts.append("")  # blank line
-    parts.extend(details_lines[:2])  # 1–2 lines
-    parts.append("")  # blank line
-    parts.append(f"More: {more_url}")
-    parts.append(f"{issued_short} #TayTownship #ONStorm")
 
-    text = "\n".join([p for p in parts if p is not None])
+def load_care_statements_rows() -> List[dict]:
+    """
+    Reads CareStatements tab. Expected columns:
+      enabled, colour, type, text
 
-    # Hard 280-char safety: trim details first
-    if len(text) <= 280:
-        return text
+    - colour: 🔴 🟠 🟡 ⚪ or blank for "any"
+    - type:   lowercase match of alert type label (example: "special weather statement")
+              or blank for "any"
+    """
+    sheets_svc, _, sheet_id, _ = _google_services()
+    if not sheets_svc or not sheet_id:
+        return []
 
-    # Drop second detail line
-    if len(details_lines) > 1:
-        parts2 = [
-            title_line,
-            "",
-            details_lines[0],
-            "",
-            f"More: {more_url}",
-            f"{issued_short} #TayTownship #ONStorm",
-        ]
-        text2 = "\n".join([p for p in parts2 if p is not None])
-        if len(text2) <= 280:
-            return text2
+    rng = "CareStatements!A:Z"
+    resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
+    values = resp.get("values", [])
+    if not values or len(values) < 2:
+        return []
 
-    # Drop details entirely
-    parts3 = [
-        title_line,
-        "",
-        f"More: {more_url}",
-        f"{issued_short} #TayTownship #ONStorm",
+    headers = [h.strip().lower() for h in values[0]]
+    rows: List[dict] = []
+    for v in values[1:]:
+        row = {}
+        for i, h in enumerate(headers):
+            row[h] = v[i].strip() if i < len(v) and isinstance(v[i], str) else (v[i] if i < len(v) else "")
+        rows.append(row)
+    return rows
+
+
+def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> str:
+    """
+    Precedence (best -> fallback):
+      enabled + exact colour + exact type
+      enabled + any colour + exact type
+      enabled + exact colour + any type
+      enabled + any colour + any type
+    """
+    def enabled(r: dict) -> bool:
+        return str(r.get("enabled", "")).strip().lower() in ("true", "yes", "1", "y")
+
+    def norm_colour(c: str) -> str:
+        c = (c or "").strip().lower()
+        if c in ("🔴", "red", "warning"):
+            return "🔴"
+        if c in ("🟠", "orange", "watch"):
+            return "🟠"
+        if c in ("🟡", "yellow", "advisory"):
+            return "🟡"
+        if c in ("⚪", "white", "other", "statement"):
+            return "⚪"
+        return (c or "").strip()
+
+    want_type = (alert_type or "").strip().lower()
+    want_colour = norm_colour((colour or "").strip())
+
+    def matches(r: dict, c_req: str, t_req: str) -> bool:
+        rc = norm_colour((r.get("colour") or "").strip())
+        rt = (r.get("type") or "").strip().lower()
+        if c_req and rc != c_req:
+            return False
+        if t_req and rt != t_req:
+            return False
+        return True
+
+    buckets = [
+        (want_colour, want_type),
+        ("", want_type),
+        (want_colour, ""),
+        ("", ""),
     ]
-    text3 = "\n".join([p for p in parts3 if p is not None])
-    if len(text3) <= 280:
-        return text3
 
-    return text[:277].rstrip() + "..."
+    for bc, bt in buckets:
+        for r in care_rows:
+            if not enabled(r):
+                continue
+            if matches(r, bc, bt):
+                txt = (r.get("text") or "").strip()
+                if txt:
+                    return txt
+    return ""
 
 
-def build_facebook_post_text(entry: Dict[str, Any], care: str = "") -> str:
-    title_raw = atom_title_for_tay((entry.get("title") or "").strip())
-    issued_raw = (entry.get("summary") or "").strip()
-    official = (entry.get("link") or "").strip()
+def load_media_rules_rows() -> List[dict]:
+    """
+    OPTIONAL: Reads MediaRules tab if you later decide to use it.
+    If this sheet is empty or missing, we simply won't use rules.
 
-    sev = severity_emoji(title_raw)
-    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
-    issued_short = _issued_short(issued_raw)
+    Suggested columns (if you ever add them):
+      enabled, colour, type, query, limit, use_cameras
+    """
+    sheets_svc, _, sheet_id, _ = _google_services()
+    if not sheets_svc or not sheet_id:
+        return []
 
-    details_lines: List[str] = []
     try:
-        details_lines = _extract_details_lines_from_ec(official)
-    except Exception as e:
-        print(f"⚠️ EC details parse failed (FB): {e}")
-        details_lines = []
-
-    more_url = get_more_info_url()
-
-    parts: List[str] = []
-    parts.append(title_line)
-    parts.append("")
-    parts.extend(details_lines[:3])  # FB can take a bit more
-    if care:
-        parts.append("")
-        parts.append(care.strip())
-    parts.append("")
-    parts.append(f"More: {more_url}")
-    parts.append(f"{issued_short} #TayTownship #ONStorm")
-
-    return "\n".join([p for p in parts if p is not None])
+        rng = "MediaRules!A:Z"
+        resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
+        values = resp.get("values", [])
+        if not values or len(values) < 2:
+            return []
+        headers = [h.strip().lower() for h in values[0]]
+        rows: List[dict] = []
+        for v in values[1:]:
+            row = {}
+            for i, h in enumerate(headers):
+                row[h] = v[i].strip() if i < len(v) and isinstance(v[i], str) else (v[i] if i < len(v) else "")
+            rows.append(row)
+        return rows
+    except Exception:
+        # If the tab doesn't exist, return empty.
+        return []
 
 
-def build_rss_description_from_atom(entry: Dict[str, Any]) -> str:
-    title = atom_title_for_tay((entry.get("title") or "").strip())
-    issued = (entry.get("summary") or "").strip()
-    official = (entry.get("link") or "").strip()
-    bits = [title]
-    if issued:
-        bits.append(issued)
-    bits.append(f"More info (Tay Township): {get_more_info_url()}")
-    if official:
-        bits.append(f"Official alert details: {official}")
-    return "\n".join(bits)
+# =============================================================================
+# Google Drive curated photos (FIRST choice for images)
+# =============================================================================
+def _drive_direct_download_url(file_id: str) -> str:
+    # This is a stable "download" endpoint for Drive files.
+    # (We still fetch the bytes ourselves when posting to X/FB.)
+    return f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
 
 
-# ----------------------------
-# RSS helpers
-# ----------------------------
-def ensure_rss_exists() -> None:
-    if os.path.exists(RSS_PATH):
-        return
+def pick_drive_images(
+    drive_svc: Any,
+    folder_id: str,
+    alert_type_label: str,
+    severity: str,
+    max_images: int = 2,
+) -> List[str]:
+    """
+    This is the "simple default" Drive picker when you don't have MediaRules.
 
-    rss = ET.Element("rss", version="2.0")
-    channel = ET.SubElement(rss, "channel")
+    How it works:
+      - It lists images in the folder (jpg/png/webp/gif allowed, but we mostly expect jpg/png)
+      - It tries to prefer files whose *name* contains:
+          - the alert type words (e.g., "special", "wind", "snow")
+          - OR the colour emoji bucket words if you included them in filenames (optional)
+      - If it can't find matches, it just takes the newest images.
 
-    ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
-    ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
-    ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
-    ET.SubElement(channel, "language").text = "en-ca"
+    Output:
+      - Returns special "drive://" refs we can later download via Drive API.
+    """
+    if not drive_svc or not folder_id:
+        return []
 
-    ET.ElementTree(rss).write(RSS_PATH, encoding="utf-8", xml_declaration=True)
+    # Collect keywords from alert type label
+    # Example: "special weather statement" -> ["special","weather","statement"]
+    words = [w for w in re.split(r"[^a-z0-9]+", (alert_type_label or "").lower()) if w]
+    words = [w for w in words if len(w) >= 3]  # avoid tiny words
 
+    # Optional: colour keyword
+    colour_words = {
+        "🔴": ["red", "warning"],
+        "🟠": ["orange", "watch"],
+        "🟡": ["yellow", "advisory"],
+        "⚪": ["white", "statement", "other"],
+    }.get(severity, [])
 
-def load_rss_tree() -> Tuple[ET.ElementTree, ET.Element]:
-    ensure_rss_exists()
-    tree = ET.parse(RSS_PATH)
-    root = tree.getroot()
-    channel = root.find("channel")
-    if channel is None:
-        raise RuntimeError("RSS file missing <channel>")
-    return tree, channel
+    # List up to 50 recent images from the folder
+    q = (
+        f"'{folder_id}' in parents and trashed = false and "
+        "("
+        "mimeType contains 'image/'"
+        ")"
+    )
 
+    resp = drive_svc.files().list(
+        q=q,
+        pageSize=50,
+        fields="files(id,name,mimeType,modifiedTime)",
+        orderBy="modifiedTime desc",
+    ).execute()
 
-def rss_item_exists(channel: ET.Element, guid_text: str) -> bool:
-    for item in channel.findall("item"):
-        guid = item.find("guid")
-        if guid is not None and (guid.text or "").strip() == guid_text:
-            return True
-    return False
+    files = resp.get("files", []) or []
 
+    # Score files by how well their name matches alert keywords
+    def score(name: str) -> int:
+        n = (name or "").lower()
+        sc = 0
+        for w in words:
+            if w in n:
+                sc += 3
+        for w in colour_words:
+            if w in n:
+                sc += 2
+        return sc
 
-def add_rss_item(channel: ET.Element, title: str, link: str, guid: str, pub_date: str, description: str) -> None:
-    item = ET.Element("item")
-    ET.SubElement(item, "title").text = title
-    ET.SubElement(item, "link").text = link
-    g = ET.SubElement(item, "guid")
-    g.text = guid
-    g.set("isPermaLink", "false")
-    ET.SubElement(item, "pubDate").text = pub_date
-    ET.SubElement(item, "description").text = description
+    scored = sorted(files, key=lambda f: (score(f.get("name", "")), f.get("modifiedTime", "")), reverse=True)
 
-    insert_index = 0
-    for i, child in enumerate(list(channel)):
-        if child.tag in {"title", "link", "description", "language", "lastBuildDate"}:
-            insert_index = i + 1
-    channel.insert(insert_index, item)
+    picked: List[str] = []
+    for f in scored:
+        if len(picked) >= max_images:
+            break
+        fid = (f.get("id") or "").strip()
+        if not fid:
+            continue
+        picked.append(f"drive://{fid}")
 
-
-def trim_rss_items(channel: ET.Element, max_items: int) -> None:
-    items = channel.findall("item")
-    if len(items) <= max_items:
-        return
-    for item in items[max_items:]:
-        channel.remove(item)
-
-
-MAX_RSS_ITEMS = 25
-
-
-# ----------------------------
-# Cooldown logic
-# ----------------------------
-def group_key_for_cooldown(area_name: str, kind: str) -> str:
-    raw = f"{normalize(area_name)}|{normalize(kind)}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-
-def cooldown_allows_post(state: Dict[str, Any], area_name: str, kind: str = "alert") -> Tuple[bool, str]:
-    now_ts = int(time.time())
-
-    last_global = safe_int(state.get("global_last_post_ts", 0), 0)
-    if last_global and (now_ts - last_global) < (GLOBAL_COOLDOWN_MINUTES * 60):
-        return False, f"Global cooldown active ({GLOBAL_COOLDOWN_MINUTES}m)."
-
-    key = group_key_for_cooldown(area_name, kind)
-    cooldowns = state.get("cooldowns", {}) if isinstance(state.get("cooldowns"), dict) else {}
-    last_ts = safe_int(cooldowns.get(key, 0), 0)
-
-    mins = COOLDOWN_MINUTES.get(kind, COOLDOWN_MINUTES["default"])
-    if last_ts and (now_ts - last_ts) < (mins * 60):
-        return False, f"Cooldown active for group ({mins}m)."
-
-    return True, "OK"
+    return picked[:max_images]
 
 
-def mark_posted(state: Dict[str, Any], area_name: str, kind: str = "alert") -> None:
-    now_ts = int(time.time())
-    key = group_key_for_cooldown(area_name, kind)
-    state.setdefault("cooldowns", {})
-    state["cooldowns"][key] = now_ts
-    state["global_last_post_ts"] = now_ts
+def download_drive_image_bytes(drive_svc: Any, drive_ref: str) -> Tuple[bytes, str]:
+    """
+    Convert a drive://<fileId> ref into actual bytes.
+    """
+    m = re.match(r"^drive://(.+)$", (drive_ref or "").strip())
+    if not m:
+        raise RuntimeError("Invalid drive ref")
+
+    file_id = m.group(1).strip()
+    if not file_id:
+        raise RuntimeError("Empty drive file id")
+
+    # Metadata fetch (to get mimeType if available)
+    meta = drive_svc.files().get(fileId=file_id, fields="mimeType,name").execute()
+    mime = (meta.get("mimeType") or "application/octet-stream").lower()
+
+    # Media fetch
+    data = drive_svc.files().get_media(fileId=file_id).execute()
+    if not isinstance(data, (bytes, bytearray)):
+        # googleapiclient sometimes returns bytes; but handle edge cases
+        data = bytes(data)
+
+    # Normalize a few common types
+    if mime == "image/jpg":
+        mime = "image/jpeg"
+
+    return bytes(data), mime
 
 
-# ----------------------------
-# Ontario 511 camera resolver
-# ----------------------------
+# =============================================================================
+# Ontario 511 camera resolver (SECOND choice for images)
+# =============================================================================
 _ON511_CAMERAS_CACHE: Optional[List[Dict[str, Any]]] = None
 
 
 def is_image_url(url: str) -> bool:
-    """Does URL respond with Content-Type image/*?"""
+    """
+    Validate URL responds with Content-Type image/*.
+    """
     url = (url or "").strip()
     if not url:
         return False
@@ -821,6 +817,7 @@ def pick_north_south_view_urls(views: List[Dict[str, Any]]) -> Tuple[str, str]:
         if ("south" in d or "sb" in d) and not south:
             south = u
 
+    # Fallback if no clear NB/SB tags
     if not north or not south:
         urls: List[str] = []
         for v in views:
@@ -836,7 +833,9 @@ def pick_north_south_view_urls(views: List[Dict[str, Any]]) -> Tuple[str, str]:
 
 
 def resolve_cr29_image_urls() -> List[str]:
-    """Resolve up to two image URLs (north, south) with fallbacks."""
+    """
+    Returns up to two image URLs (north, south) with fallbacks.
+    """
     north_env = (os.getenv("CR29_NORTH_IMAGE_URL") or "").strip()
     south_env = (os.getenv("CR29_SOUTH_IMAGE_URL") or "").strip()
 
@@ -861,9 +860,163 @@ def resolve_cr29_image_urls() -> List[str]:
     return urls[:2]
 
 
-# ----------------------------
-# X OAuth2 (posting) helpers
-# ----------------------------
+# =============================================================================
+# On511 camera "bug" overlay for Ontario 511 images (stamp lower-right)
+# =============================================================================
+def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
+    """
+    Adds the On511/Tay bug in the lower-right corner for Ontario 511 camera images.
+    If anything fails, return the original bytes so posting still works.
+    """
+    BUG_RELATIVE_WIDTH = 0.07
+    BUG_MIN_WIDTH_PX = 35
+    BUG_OPACITY_ALPHA = 80
+    BUG_PAD_RELATIVE = 0.015
+
+    try:
+        im = Image.open(BytesIO(image_bytes)).convert("RGBA")
+
+        asset_path = Path(__file__).resolve().parent / "assets" / "On511_logo.png"
+        logo = Image.open(asset_path).convert("RGBA")
+
+        target_w = max(BUG_MIN_WIDTH_PX, int(im.width * BUG_RELATIVE_WIDTH))
+        scale = target_w / float(logo.width)
+        target_h = max(1, int(logo.height * scale))
+        logo = logo.resize((target_w, target_h), resample=Image.LANCZOS)
+
+        if BUG_OPACITY_ALPHA < 255:
+            alpha = logo.getchannel("A")
+            a_scale = BUG_OPACITY_ALPHA / 255.0
+            alpha = alpha.point(lambda p: int(p * a_scale))
+            logo.putalpha(alpha)
+
+        pad = max(8, int(im.width * BUG_PAD_RELATIVE))
+        x = max(0, im.width - logo.width - pad)
+        y = max(0, im.height - logo.height - pad)
+
+        im.alpha_composite(logo, (x, y))
+
+        out = BytesIO()
+        im.save(out, format="PNG", optimize=True)
+        return out.getvalue(), "image/png"
+
+    except Exception as e:
+        print("⚠️ On511 bug overlay failed; using original image:", e)
+        return image_bytes, mime_type
+
+
+def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
+    """
+    Downloads an image URL and returns (bytes, mime_type).
+    Applies the On511 bug overlay for Ontario 511 camera captures.
+    """
+    image_url = (image_url or "").strip()
+    if not image_url:
+        raise RuntimeError("No image_url provided")
+
+    r = requests.get(
+        image_url,
+        headers={"User-Agent": USER_AGENT},
+        timeout=(10, 30),
+        allow_redirects=True,
+    )
+    r.raise_for_status()
+
+    content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if not content_type.startswith("image/"):
+        raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
+
+    data = r.content
+
+    # Apply bug only to 511 CCTV URLs
+    u = image_url.lower()
+    if "511on.ca" in u and "/cctv/" in u:
+        data, content_type = apply_on511_bug(data, content_type)
+
+    return data, content_type
+
+
+# =============================================================================
+# Facebook image loader wiring
+#   - fb.safe_post_facebook uses fb.load_image_bytes for NON-URL refs
+#   - We override it so we can support:
+#       - local temp files
+#       - URLs (download)
+#       - drive:// refs (download from Drive)
+# =============================================================================
+_DRIVE_SVC_FOR_MEDIA: Optional[Any] = None  # set in main() if available
+
+
+def fb_load_image_bytes(ref: str) -> Tuple[bytes, str]:
+    """
+    Image loader used by facebook_poster.
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        raise RuntimeError("No image ref provided")
+
+    # Local file path
+    if os.path.exists(ref):
+        with open(ref, "rb") as f:
+            data = f.read()
+        ext = os.path.splitext(ref)[1].lower()
+        if ext == ".png":
+            return data, "image/png"
+        if ext in (".jpg", ".jpeg"):
+            return data, "image/jpeg"
+        return data, "application/octet-stream"
+
+    # Google Drive ref
+    if ref.startswith("drive://"):
+        if not _DRIVE_SVC_FOR_MEDIA:
+            raise RuntimeError("Drive ref provided but Drive service is not configured")
+        return download_drive_image_bytes(_DRIVE_SVC_FOR_MEDIA, ref)
+
+    # Otherwise treat as URL
+    return download_image_bytes(ref)
+
+
+fb.load_image_bytes = fb_load_image_bytes
+
+
+def materialize_images_for_facebook(image_refs: List[str]) -> List[str]:
+    """
+    Facebook path: force our loader to run and create local temp files,
+    so we can guarantee bug overlays and Drive downloads happen reliably.
+
+    Input:
+      - a list of image refs which can be:
+          - URL
+          - drive://<fileId>
+          - local file path (rare)
+
+    Output:
+      - list of local /tmp file paths
+    """
+    out_paths: List[str] = []
+    for i, ref in enumerate([x for x in (image_refs or []) if (x or "").strip()][:10]):
+        # Use the fb loader so it can handle URL/drive/local
+        b, mt = fb_load_image_bytes(ref)
+        ext = "png" if mt == "image/png" else "jpg"
+        p = f"/tmp/tay_media_{i}.{ext}"
+        with open(p, "wb") as f:
+            f.write(b)
+        out_paths.append(p)
+    return out_paths
+
+
+def cleanup_tmp_media_files(paths: List[str]) -> None:
+    for p in paths or []:
+        try:
+            if isinstance(p, str) and p.startswith("/tmp/tay_media_"):
+                os.remove(p)
+        except Exception:
+            pass
+
+
+# =============================================================================
+# X OAuth2 (posting) + OAuth1 (media upload)
+# =============================================================================
 def write_rotated_refresh_token(new_refresh: str) -> None:
     new_refresh = (new_refresh or "").strip()
     if not new_refresh:
@@ -914,107 +1067,11 @@ def get_oauth2_access_token() -> str:
     return access
 
 
-# ----------------------------
-# X media upload helpers (OAuth 1.0a)
-# ----------------------------
-
-# ----------------------------
-# On511 camera "bug" overlay (stamp in lower-right corner)
-# - Applies only to Ontario 511 camera images (CR29 URLs)
-# - If anything fails, returns the original image bytes so posting still works
-# ----------------------------
-def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
+def x_upload_media(image_ref: str) -> str:
     """
-    Adds the On511/Tay 'bug' in the lower-right corner for Ontario 511 camera images.
+    Upload one image to X and return media_id_string.
+    Accepts URL or drive://.
     """
-    BUG_RELATIVE_WIDTH = 0.07
-    BUG_MIN_WIDTH_PX   = 35
-    BUG_OPACITY_ALPHA  = 80
-    BUG_PAD_RELATIVE   = 0.015
-
-    try:
-        im = Image.open(BytesIO(image_bytes)).convert("RGBA")
-        asset_path = Path(__file__).resolve().parent / "assets" / "On511_logo.png"
-        logo = Image.open(asset_path).convert("RGBA")
-
-        target_w = max(BUG_MIN_WIDTH_PX, int(im.width * BUG_RELATIVE_WIDTH))
-        scale = target_w / float(logo.width)
-        target_h = max(1, int(logo.height * scale))
-        logo = logo.resize((target_w, target_h), resample=Image.LANCZOS)
-
-        if BUG_OPACITY_ALPHA < 255:
-            alpha = logo.getchannel("A")
-            scale = BUG_OPACITY_ALPHA / 255.0
-            alpha = alpha.point(lambda p: int(p * scale))
-            logo.putalpha(alpha)
-
-        pad = max(8, int(im.width * BUG_PAD_RELATIVE))
-        x = max(0, im.width - logo.width - pad)
-        y = max(0, im.height - logo.height - pad)
-        im.alpha_composite(logo, (x, y))
-
-        out = BytesIO()
-        im.save(out, format="PNG", optimize=True)
-        return out.getvalue(), "image/png"
-
-    except Exception as e:
-        print("⚠️ On511 bug overlay failed; using original image:", e)
-        return image_bytes, mime_type
-
-
-def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
-    """
-    Downloads an image URL and returns (bytes, mime_type).
-    Applies the On511 bug overlay for Ontario 511 camera captures.
-    """
-    image_url = (image_url or "").strip()
-    if not image_url:
-        raise RuntimeError("No image_url provided")
-
-    r = requests.get(
-        image_url,
-        headers={"User-Agent": USER_AGENT},
-        timeout=(10, 30),
-        allow_redirects=True,
-    )
-    r.raise_for_status()
-
-    content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-    if not content_type.startswith("image/"):
-        raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
-
-    data = r.content
-
-    u = image_url.lower()
-    if "511on.ca" in u and "/cctv/" in u:
-        data, content_type = apply_on511_bug(data, content_type)
-
-    return data, content_type
-
-
-def fb_load_image_bytes(ref: str) -> Tuple[bytes, str]:
-    ref = (ref or "").strip()
-    if not ref:
-        raise RuntimeError("No image ref provided")
-
-    if os.path.exists(ref):
-        with open(ref, "rb") as f:
-            data = f.read()
-
-        ext = os.path.splitext(ref)[1].lower()
-        if ext == ".png":
-            return data, "image/png"
-        if ext in (".jpg", ".jpeg"):
-            return data, "image/jpeg"
-        return data, "application/octet-stream"
-
-    return download_image_bytes(ref)
-
-
-fb.load_image_bytes = fb_load_image_bytes
-
-
-def x_upload_media(image_url: str) -> str:
     api_key = os.getenv("X_API_KEY", "").strip()
     api_secret = os.getenv("X_API_SECRET", "").strip()
     access_token = os.getenv("X_ACCESS_TOKEN", "").strip()
@@ -1029,7 +1086,15 @@ def x_upload_media(image_url: str) -> str:
     if missing:
         raise RuntimeError(f"Missing required X OAuth1 env vars: {', '.join(missing)}")
 
-    img_bytes, mime_type = download_image_bytes(image_url)
+    # Download bytes from ref:
+    # - URL: download_image_bytes
+    # - drive://: download_drive_image_bytes
+    if image_ref.startswith("drive://"):
+        if not _DRIVE_SVC_FOR_MEDIA:
+            raise RuntimeError("Drive ref provided but Drive service is not configured")
+        img_bytes, mime_type = download_drive_image_bytes(_DRIVE_SVC_FOR_MEDIA, image_ref)
+    else:
+        img_bytes, mime_type = download_image_bytes(image_ref)
 
     auth = OAuth1(api_key, api_secret, access_token, access_secret)
     upload_url = "https://upload.twitter.com/1.1/media/upload.json"
@@ -1049,16 +1114,19 @@ def x_upload_media(image_url: str) -> str:
     return media_id
 
 
-def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, Any]:
+def post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Posts a tweet, optionally with up to 4 images.
+    """
     url = "https://api.x.com/2/tweets"
     access_token = get_oauth2_access_token()
 
     payload: Dict[str, Any] = {"text": text}
 
-    image_urls = [u for u in (image_urls or []) if (u or "").strip()]
-    if image_urls:
+    image_refs = [u for u in (image_refs or []) if (u or "").strip()]
+    if image_refs:
         media_ids: List[str] = []
-        for u in image_urls[:4]:
+        for u in image_refs[:4]:
             try:
                 media_ids.append(x_upload_media(u))
             except Exception as e:
@@ -1095,136 +1163,330 @@ def post_to_x(text: str, image_urls: Optional[List[str]] = None) -> Dict[str, An
     return r.json()
 
 
-# ----------------------------
-# Facebook Page posting helpers
-# ----------------------------
-def post_to_facebook_page(message: str) -> Dict[str, Any]:
-    page_id = os.getenv("FB_PAGE_ID", "").strip()
-    page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
-    if not page_id or not page_token:
-        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
-
-    url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
-    r = requests.post(url, data={"message": message, "access_token": page_token}, timeout=30)
-    print("FB POST /feed status:", r.status_code)
-    if r.status_code >= 400:
-        raise RuntimeError(f"Facebook feed post failed {r.status_code}")
-    return r.json()
+# =============================================================================
+# RSS building
+# =============================================================================
+MAX_RSS_ITEMS = 25
 
 
-def post_photo_to_facebook_page(caption: str, image_url: str) -> Dict[str, Any]:
-    page_id = os.getenv("FB_PAGE_ID", "").strip()
-    page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
-    if not page_id or not page_token:
-        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
-    if not image_url:
-        raise RuntimeError("Missing image_url for FB photo post")
+def ensure_rss_exists() -> None:
+    if os.path.exists(RSS_PATH):
+        return
 
-    url = f"https://graph.facebook.com/v24.0/{page_id}/photos"
-    r = requests.post(
-        url,
-        data={
-            "url": image_url,
-            "caption": caption,
-            "access_token": page_token,
-        },
-        timeout=30,
+    rss = ET.Element("rss", version="2.0")
+    channel = ET.SubElement(rss, "channel")
+
+    ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
+    ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
+    ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
+    ET.SubElement(channel, "language").text = "en-ca"
+
+    ET.ElementTree(rss).write(RSS_PATH, encoding="utf-8", xml_declaration=True)
+
+
+def load_rss_tree() -> Tuple[ET.ElementTree, ET.Element]:
+    ensure_rss_exists()
+    tree = ET.parse(RSS_PATH)
+    root = tree.getroot()
+    channel = root.find("channel")
+    if channel is None:
+        raise RuntimeError("RSS file missing <channel>")
+    return tree, channel
+
+
+def rss_item_exists(channel: ET.Element, guid_text: str) -> bool:
+    for item in channel.findall("item"):
+        guid = item.find("guid")
+        if guid is not None and (guid.text or "").strip() == guid_text:
+            return True
+    return False
+
+
+def add_rss_item(channel: ET.Element, title: str, link: str, guid: str, pub_date: str, description: str) -> None:
+    item = ET.Element("item")
+    ET.SubElement(item, "title").text = title
+    ET.SubElement(item, "link").text = link
+    g = ET.SubElement(item, "guid")
+    g.text = guid
+    g.set("isPermaLink", "false")
+    ET.SubElement(item, "pubDate").text = pub_date
+    ET.SubElement(item, "description").text = description
+
+    insert_index = 0
+    for i, child in enumerate(list(channel)):
+        if child.tag in {"title", "link", "description", "language", "lastBuildDate"}:
+            insert_index = i + 1
+    channel.insert(insert_index, item)
+
+
+def trim_rss_items(channel: ET.Element, max_items: int) -> None:
+    items = channel.findall("item")
+    if len(items) <= max_items:
+        return
+    for item in items[max_items:]:
+        channel.remove(item)
+
+
+def build_rss_description_from_atom(entry: Dict[str, Any], more_url: str) -> str:
+    title = atom_title_for_tay((entry.get("title") or "").strip())
+    issued = (entry.get("summary") or "").strip()
+    official = (entry.get("link") or "").strip()
+
+    bits = [title]
+    if issued:
+        bits.append(issued)
+    bits.append(f"More info (Tay Township): {more_url}")
+    if official:
+        bits.append(f"Official alert details: {official}")
+    return "\n".join(bits)
+
+
+# =============================================================================
+# Social text formatting
+#   - X format (exact layout you asked for)
+#   - Facebook format (same layout + care statement)
+# =============================================================================
+def _pretty_title_for_social(title: str) -> str:
+    """
+    Convert 'Snow Squall Warning (Tay Township area)' -> 'Snow Squall Warning in Tay Township'
+    """
+    t = (title or "").strip()
+    t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
+    return f"{t} in Tay Township"
+
+
+def _issued_short(issued: str) -> str:
+    """
+    Convert 'Issued: 5:07 PM EST Sunday 4 January 2026'
+    -> 'Issued Jan 4 5:07p'
+    """
+    s = (issued or "").strip()
+    s2 = re.sub(r"^Issued:\s*", "", s, flags=re.IGNORECASE).strip()
+
+    m = re.search(
+        r"(?P<h>\d{1,2}):(?P<min>\d{2})\s*(?P<ampm>AM|PM)\b.*?\b(?P<day>\d{1,2})\s+(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)\s+(?P<year>\d{4})",
+        s2,
+        flags=re.IGNORECASE,
     )
-    print("FB POST /photos status:", r.status_code)
-    if r.status_code >= 400:
-        raise RuntimeError(f"Facebook photo post failed {r.status_code}")
-    return r.json()
+    if not m:
+        return s  # fallback (won't break posting)
+
+    h = int(m.group("h"))
+    minute = m.group("min")
+    ampm = m.group("ampm").lower()
+    day = int(m.group("day"))
+    month = m.group("month").strip().capitalize()[:3]
+
+    suffix = "a" if ampm.startswith("a") else "p"
+    return f"Issued {month} {day} {h}:{minute}{suffix}"
 
 
-def post_carousel_to_facebook_page(caption: str, image_urls: List[str]) -> Dict[str, Any]:
-    """Posts up to 10 images as a single carousel post."""
-    image_urls = [u for u in (image_urls or []) if (u or "").strip()]
+def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
+    """
+    X should NOT include care statement.
+    """
+    title_raw = atom_title_for_tay((entry.get("title") or "").strip())
+    issued_raw = (entry.get("summary") or "").strip()
+    official = (entry.get("link") or "").strip()
 
-    if not image_urls:
-        return post_to_facebook_page(caption)
+    sev = severity_emoji(title_raw)
+    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
 
-    if len(image_urls) == 1:
-        return post_photo_to_facebook_page(caption, image_urls[0])
+    details_lines: List[str] = []
+    try:
+        details_lines = _extract_details_lines_from_ec(official)
+    except Exception as e:
+        print(f"⚠️ EC details parse failed (X): {e}")
 
-    page_id = os.getenv("FB_PAGE_ID", "").strip()
-    page_token = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
-    if not page_id or not page_token:
-        raise RuntimeError("Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN")
+    issued_short = _issued_short(issued_raw)
 
-    media_fbids: List[str] = []
+    parts: List[str] = []
+    parts.append(title_line)
+    parts.append("")  # blank line
+    parts.extend(details_lines[:2])  # 1–2 lines
+    parts.append("")
+    parts.append(f"More: {more_url}")
+    parts.append(f"{issued_short} #TayTownship #ONStorm")
 
-    for u in image_urls[:10]:
+    text = "\n".join([p for p in parts if p is not None])
+
+    # Hard 280-char safety: trim details first
+    if len(text) <= 280:
+        return text
+
+    if len(details_lines) > 1:
+        parts2 = [
+            title_line,
+            "",
+            details_lines[0],
+            "",
+            f"More: {more_url}",
+            f"{issued_short} #TayTownship #ONStorm",
+        ]
+        text2 = "\n".join([p for p in parts2 if p is not None])
+        if len(text2) <= 280:
+            return text2
+
+    parts3 = [
+        title_line,
+        "",
+        f"More: {more_url}",
+        f"{issued_short} #TayTownship #ONStorm",
+    ]
+    text3 = "\n".join([p for p in parts3 if p is not None])
+    if len(text3) <= 280:
+        return text3
+
+    return text[:277].rstrip() + "..."
+
+
+def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) -> str:
+    """
+    Facebook SHOULD include care statement (when present).
+    Facebook doesn't have the 280-char constraint, so we keep up to 3 detail lines.
+    """
+    title_raw = atom_title_for_tay((entry.get("title") or "").strip())
+    issued_raw = (entry.get("summary") or "").strip()
+    official = (entry.get("link") or "").strip()
+
+    sev = severity_emoji(title_raw)
+    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
+    issued_short = _issued_short(issued_raw)
+
+    details_lines: List[str] = []
+    try:
+        details_lines = _extract_details_lines_from_ec(official)
+    except Exception as e:
+        print(f"⚠️ EC details parse failed (FB): {e}")
+
+    parts: List[str] = []
+    parts.append(title_line)
+    parts.append("")
+    parts.extend(details_lines[:3])
+
+    if care:
+        parts.append("")
+        parts.append(care.strip())
+
+    parts.append("")
+    parts.append(f"More: {more_url}")
+    parts.append(f"{issued_short} #TayTownship #ONStorm")
+
+    return "\n".join([p for p in parts if p is not None])
+
+
+# =============================================================================
+# Image selection policy (THIS is where your "Drive first, cameras fallback" lives)
+# =============================================================================
+def choose_images_for_alert(
+    drive_svc: Optional[Any],
+    drive_folder_id: str,
+    alert_kind: str,
+    alert_type_label: str,
+    severity: str,
+) -> List[str]:
+    """
+    This function returns the final list of image refs to use for this alert.
+
+    RULES YOU REQUESTED:
+      1) Always check Google Drive first for curated photos.
+      2) If Drive has nothing usable, then fall back to highway cameras.
+      3) If alert is a WIND WARNING, do NOT use highway cameras (so return [] if Drive fails).
+
+    Note:
+      - We return "refs", not bytes.
+      - Refs can be:
+          - drive://<fileId>
+          - https://... image URL (511 cameras)
+    """
+    # 1) Drive first
+    drive_refs: List[str] = []
+    if drive_svc and drive_folder_id:
         try:
-            url = f"https://graph.facebook.com/v24.0/{page_id}/photos"
-            r = requests.post(
-                url,
-                data={
-                    "url": u,
-                    "published": "false",
-                    "access_token": page_token,
-                },
-                timeout=30,
+            drive_refs = pick_drive_images(
+                drive_svc=drive_svc,
+                folder_id=drive_folder_id,
+                alert_type_label=alert_type_label,
+                severity=severity,
+                max_images=2,
             )
-            if r.status_code >= 400:
-                print(f"⚠️ FB carousel upload failed for one image: {r.status_code}")
-                continue
-            j = r.json()
-            fbid = j.get("id")
-            if fbid:
-                media_fbids.append(str(fbid))
         except Exception as e:
-            print(f"⚠️ FB carousel upload skipped for one image: {e}")
+            print(f"⚠️ Drive image selection failed: {e}")
+            drive_refs = []
 
-    if not media_fbids:
-        return post_to_facebook_page(caption)
+    if drive_refs:
+        return drive_refs[:2]
 
-    if len(media_fbids) == 1:
-        return post_photo_to_facebook_page(caption, image_urls[0])
+    # 2) Wind warning rule: no cameras
+    #    (You explicitly asked this.)
+    if alert_kind == "warning" and "wind" in (alert_type_label or "").lower():
+        return []
 
-    data: Dict[str, Any] = {"message": caption, "access_token": page_token}
-    for i, fbid in enumerate(media_fbids):
-        data[f"attached_media[{i}]"] = json.dumps({"media_fbid": fbid})
-
-    feed_url = f"https://graph.facebook.com/v24.0/{page_id}/feed"
-    r = requests.post(feed_url, data=data, timeout=30)
-    print("FB POST /feed (carousel) status:", r.status_code)
-    if r.status_code >= 400:
-        raise RuntimeError(f"Facebook carousel post failed {r.status_code}")
-
-    return r.json()
+    # 3) Cameras fallback
+    try:
+        return resolve_cr29_image_urls()
+    except Exception as e:
+        print(f"⚠️ Camera fallback failed: {e}")
+        return []
 
 
-# ----------------------------
-# Main
-# ----------------------------
-def classify_alert_kind(title: str) -> str:
-    t = (title or "").lower()
-    if "warning" in t:
-        return "warning"
-    if "watch" in t:
-        return "watch"
-    return "other"
-
-
+# =============================================================================
+# Main routine
+# =============================================================================
 def main() -> None:
-    # Clean up any previous rotated token file
+    # Always resolve the "More:" URL at runtime.
+    # This ensures the bot prefers TAY_ALERTS_URL if it's reachable.
+    more_url = resolve_more_info_url()
+
+    # Remove rotated token file from previous runs so we only commit if rotated THIS run
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
         try:
             os.remove(ROTATED_X_REFRESH_TOKEN_PATH)
         except Exception:
             pass
 
-    camera_image_urls = resolve_cr29_image_urls()
+    # Load Google services (may be None if secrets missing)
+    sheets_svc, drive_svc, sheet_id, drive_folder_id = _google_services()
 
-    # =========================================================
-    # Manual test mode (bypasses alerts + cooldown/dedupe)
-    # =========================================================
+    # Make drive service globally available for media downloads (X/FB)
+    global _DRIVE_SVC_FOR_MEDIA
+    _DRIVE_SVC_FOR_MEDIA = drive_svc
+
+    # Load care statements once per run (cheap + stable)
+    care_rows = []
+    try:
+        care_rows = load_care_statements_rows()
+    except Exception as e:
+        print(f"⚠️ CareStatements load failed: {e}")
+        care_rows = []
+
+    # OPTIONAL: MediaRules support (safe if empty)
+    # Not required for your current setup, but left here so you can expand later.
+    media_rules = []
+    try:
+        media_rules = load_media_rules_rows()
+        if media_rules:
+            print(f"MediaRules loaded: {len(media_rules)} rows")
+        else:
+            print("MediaRules: none (empty or missing). Using default Drive-first behaviour.")
+    except Exception as e:
+        print(f"⚠️ MediaRules load failed (ignored): {e}")
+
+    # -------------------------------------------------------------------------
+    # TEST MODE (manual)
+    #   - This is separate from real alert flow
+    #   - It posts only to platforms you turned on in the workflow inputs
+    # -------------------------------------------------------------------------
     if TEST_X or TEST_FACEBOOK:
         base = "Testing the validity of the post — please ignore ✅"
 
+        # Choose some generic images for tests:
+        # We use camera fallback in tests because it proves media upload works.
+        test_images = resolve_cr29_image_urls()
+
+        # Telegram gate for test posts
         if TELEGRAM_ENABLE_GATE:
             st = load_state()
-
             ingest_telegram_actions(st, save_state)
             maybe_send_reminders(st, save_state)
 
@@ -1238,9 +1500,7 @@ def main() -> None:
                 or (created_at and is_expired(st, token))
                 or (token and decision_for(st, token) in ("approved", "denied"))
             ):
-                token = hashlib.sha1(
-                    f"test:{dt.datetime.utcnow().isoformat()}".encode("utf-8")
-                ).hexdigest()[:10]
+                token = hashlib.sha1(f"test:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
                 st["test_gate_token"] = token
                 save_state(st)
 
@@ -1259,77 +1519,53 @@ def main() -> None:
             )
 
             ensure_preview_sent(
-                st,
-                save_state,
-                token,
-                preview_text,
-                kind="other",
-                image_urls=camera_image_urls,
+                st, save_state, token, preview_text, kind="other", image_urls=test_images
             )
 
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
                 wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
-                d = wait_for_decision(
-                    st,
-                    save_state,
-                    token,
-                    max_wait_seconds=wait_seconds,
-                    poll_interval_seconds=4,
-                )
+                d = wait_for_decision(st, save_state, token, max_wait_seconds=wait_seconds, poll_interval_seconds=4)
 
             if d == "denied":
                 print("Telegram: denied (test). Not posting.")
                 return
-
             if d != "approved":
                 print("Telegram: still pending (test). Not posting this run.")
                 return
 
+        # Post test content
         if ENABLE_X_POSTING and TEST_X:
-            post_to_x(f"{base}\n\n(X)", image_urls=camera_image_urls)
+            post_to_x(f"{base}\n\n(X)", image_refs=test_images)
 
         if ENABLE_FB_POSTING and TEST_FACEBOOK:
-            fb_state = load_state()
-            fb_state.pop("fb_cooldown_until", None)
-            fb_state.pop("fb_last_posted_at", None)
+            st2 = load_state()
+            st2.pop("fb_cooldown_until", None)
+            st2.pop("fb_last_posted_at", None)
 
-            fb_images = materialize_images_for_facebook(camera_image_urls)
+            fb_local = materialize_images_for_facebook(test_images)
             try:
                 fb_result = fb.safe_post_facebook(
-                    fb_state,
+                    st2,
                     caption=f"{base}\n\n(Facebook)",
-                    image_urls=fb_images,
+                    image_urls=fb_local,
                     has_new_social_event=True,
-                    state_path="state.json",
+                    state_path=STATE_PATH,
                 )
                 print("FB result:", fb_result)
             finally:
-                cleanup_tmp_cam_files(fb_images)
+                cleanup_tmp_media_files(fb_local)
 
-        return
+        return  # IMPORTANT: do not continue into real alert flow
 
-    # =========================================================
-    # Normal mode (process real alerts)
-    # =========================================================
+    # -------------------------------------------------------------------------
+    # NORMAL MODE (real alerts)
+    # -------------------------------------------------------------------------
     state = load_state()
     posted = set(state.get("posted_guids", []))
     posted_text_hashes = set(state.get("posted_text_hashes", []))
 
     tree, channel = load_rss_tree()
-
-    new_rss_items = 0
-    social_posted = 0
-    social_skipped_cooldown = 0
-    active_candidates = 0
-
-    # Load care statements once (cheap + consistent)
-    care_rows = []
-    try:
-        care_rows = load_care_statements_rows()
-    except Exception as e:
-        print(f"⚠️ CareStatements load failed (global): {e}")
-        care_rows = []
 
     try:
         atom_entries = fetch_atom_entries(ALERT_FEED_URL)
@@ -1338,19 +1574,17 @@ def main() -> None:
         print("Exiting cleanly; will retry on next scheduled run.")
         return
 
+    # Process newest-first
     for entry in atom_entries:
         guid = atom_entry_guid(entry)
         if not guid:
             continue
 
         title = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
-        pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
-        pub_date = email.utils.format_datetime(pub_dt)
-        link = get_more_info_url()
-        description = build_rss_description_from_atom(entry)
-
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
+
+        # Skip "ended/cancelled/no alert" entries so we don't post them socially
         inactive_markers = (
             "ended",
             "has ended",
@@ -1363,78 +1597,94 @@ def main() -> None:
             "no watches or warnings in effect",
         )
         if any(m in title_l for m in inactive_markers) or any(m in summary_l for m in inactive_markers):
-            print(f"Info: non-active / no-alert item in feed — skipping social post: {title}")
-            posted.add(guid)
+            print(f"Info: non-active item — skipping social post: {title}")
+            posted.add(guid)  # prevents repeated work every run
             continue
 
-        active_candidates += 1
+        # --- RSS write ---
+        pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
+        pub_date = email.utils.format_datetime(pub_dt)
+        link = more_url  # RSS should always point to your Tay page when available
+        description = build_rss_description_from_atom(entry, more_url=more_url)
 
         if not rss_item_exists(channel, guid):
             add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
-            new_rss_items += 1
 
+        # --- Already posted this alert GUID? then skip social
         if guid in posted:
             continue
 
-        allowed, reason = cooldown_allows_post(state, DISPLAY_AREA_NAME, kind="alert")
+        # --- Determine kind + cooldown bucket
+        alert_kind = classify_alert_kind(title)
+
+        allowed, reason = cooldown_allows_post(state, DISPLAY_AREA_NAME, kind=alert_kind)
         if not allowed:
-            social_skipped_cooldown += 1
             print("Social skipped:", reason)
             continue
 
-        # ---- Care statement (FB only) ----
-        type_label = title.split("(")[0].strip().lower()
+        # --- Build alert type label used for care statement matching + Drive image matching
+        # Example: "Special Weather Statement (Tay Township area)" -> "special weather statement"
+        type_label = re.sub(r"\s*\(.*?\)\s*$", "", title).strip().lower()
         sev = severity_emoji(title)
-        care = pick_care_statement(care_rows, sev, type_label) if care_rows else ""
 
-        # ---- Build platform-specific texts ----
-        x_text = build_x_post_text(entry)
-        fb_text = build_facebook_post_text(entry, care=care)
+        # --- CARE STATEMENT (Facebook only)
+        care = ""
+        if care_rows:
+            try:
+                care = pick_care_statement(care_rows, sev, type_label)
+            except Exception as e:
+                print(f"⚠️ Care statement match failed: {e}")
+                care = ""
 
-        # Dedupe: use the X text as the "event signature" (stable + strict)
+        # --- Choose images (Drive first, then cameras, but skip cameras for wind warning)
+        image_refs = choose_images_for_alert(
+            drive_svc=drive_svc,
+            drive_folder_id=drive_folder_id,
+            alert_kind=alert_kind,
+            alert_type_label=type_label,
+            severity=sev,
+        )
+
+        # --- Build platform-specific text
+        x_text = build_x_post_text(entry, more_url=more_url)               # NO care
+        fb_text = build_facebook_post_text(entry, care=care, more_url=more_url)  # includes care
+
+        # --- Dedupe by X text (strictest)
         h = text_hash(x_text)
         if h in posted_text_hashes:
             print("Social skipped: duplicate text hash already posted")
             posted.add(guid)
             continue
 
-        print("Social preview (X):", x_text.replace("\n", " | "))
-
-        # Wind warning rule you mentioned: don’t use highway cameras for wind warnings
-        # (If you have a different exact rule, adjust the keyword match here.)
-        img_urls = camera_image_urls
-        if "wind warning" in (title or "").lower():
-            img_urls = []
-
-        # ================================
-        # TELEGRAM PREVIEW + POLICY
-        # ================================
+        # --- Telegram gate preview / policy
         if TELEGRAM_ENABLE_GATE:
-            alert_kind = classify_alert_kind(title)  # "warning" | "watch" | "other"
             token = hashlib.sha1(guid.encode("utf-8")).hexdigest()[:10]
 
             ingest_telegram_actions(state, save_state)
             maybe_send_reminders(state, save_state)
 
+            # Preview shows BOTH texts clearly so you can spot issues immediately
             preview_text = (
                 f"🚨 {title}\n\n"
-                f"X:\n{x_text}\n\n"
-                f"Facebook:\n{fb_text}\n\n"
+                f"----- X (will post) -----\n{x_text}\n\n"
+                f"----- Facebook (will post) -----\n{fb_text}\n\n"
                 f"Alert type: {alert_kind.upper()}\n\n"
-                f"More information:\n{get_more_info_url()}"
+                f"More:\n{more_url}"
             )
+
             ensure_preview_sent(
                 state,
                 save_state,
                 token,
                 preview_text,
                 kind=alert_kind,
-                image_urls=img_urls,
+                image_urls=image_refs,
             )
 
             d = decision_for(state, token)
 
-            if alert_kind in ("watch", "other"):
+            # WATCH / ADVISORY / OTHER / STATEMENT: require explicit approve
+            if alert_kind in ("watch", "advisory", "statement", "other"):
                 if d == "denied":
                     print(f"Telegram: denied ({alert_kind}). Skipping.")
                     continue
@@ -1461,58 +1711,62 @@ def main() -> None:
                         print(f"Telegram: still pending ({alert_kind}) after wait. Skipping this run.")
                         continue
 
+            # WARNING: auto-post after delay unless denied
             elif alert_kind == "warning":
                 if d == "denied":
                     print("Telegram: denied (warning). Skipping.")
                     continue
-
                 if not warning_delay_elapsed(state, token):
                     print("Telegram: warning preview delay not elapsed yet. Skipping this run.")
                     continue
 
-        # ================================
-        # END TELEGRAM POLICY
-        # ================================
+        # --- Post now (platform-specific content)
         posted_this = False
 
         if ENABLE_X_POSTING:
-            post_to_x(x_text, image_urls=img_urls)
+            post_to_x(x_text, image_refs=image_refs)
             posted_this = True
 
         if ENABLE_FB_POSTING:
-            fb_images = materialize_images_for_facebook(img_urls)
+            # Materialize images to local files so FB always uploads reliably
+            fb_local = materialize_images_for_facebook(image_refs)
             try:
                 fb_result = fb.safe_post_facebook(
                     state,
                     caption=fb_text,
-                    image_urls=fb_images,
+                    image_urls=fb_local,
                     has_new_social_event=True,
-                    state_path="state.json",
+                    state_path=STATE_PATH,
                 )
                 print("FB result:", fb_result)
                 posted_this = True
             finally:
-                cleanup_tmp_cam_files(fb_images)
+                cleanup_tmp_media_files(fb_local)
 
+        # --- Update state after successful post(s)
         if posted_this:
             posted.add(guid)
             posted_text_hashes.add(h)
+
             state["posted_guids"] = list(posted)
             state["posted_text_hashes"] = list(posted_text_hashes)
-            save_state(state)
-            social_posted += 1
 
+            # Mark cooldowns using alert kind bucket
+            mark_posted(state, DISPLAY_AREA_NAME, kind=alert_kind)
+
+            save_state(state)
+
+    # --- Write RSS file at end
     try:
+        trim_rss_items(channel, MAX_RSS_ITEMS)
         tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
     except Exception as e:
         print(f"⚠️ Failed writing RSS to {RSS_PATH}: {e}")
 
+    # --- Persist final state snapshot
     state["posted_guids"] = list(posted)
     state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
-
-    if active_candidates == 0:
-        print("Info: no active weather alerts — nothing to post.")
 
 
 if __name__ == "__main__":
