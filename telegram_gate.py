@@ -282,7 +282,7 @@ def maybe_send_reminders(state: Dict[str, Any], save_fn: Callable[[Dict[str, Any
             rec["reminded_at"] = _utc_now_z()
             changed = True
             tg_send_message(
-                f"⏰ Reminder: approval still pending\nTOKEN: {token}\n~{int(max(0, remaining))} min remaining"
+                f"⏰ Reminder: approval still pending\nTOKEN: {token}\n~{int(max(0, remaining))} min remaining\n\nReply with ✅ Approve or 🛑 Deny."
             )
 
     if changed:
