@@ -68,6 +68,10 @@ jobs:
       FB_BLOCK_SECONDS: 21600        # 6 hours if rate-limited
       FB_JITTER_SECONDS: 10          # small randomness to avoid burst detection
 
+      # --- Telegram approval gate ---
+      TELEGRAM_ENABLE_GATE: "true"
+      TELEGRAM_PREVIEW_DELAY_MIN: "10"
+
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -114,6 +118,10 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
         run: |
           missing=0
 
@@ -133,6 +141,15 @@ jobs:
             done
           else
             echo "FB disabled for this run; skipping FB secret checks."
+          fi
+         
+          # Only require Telegram secrets if Telegram gate is enabled
+          if [ "$TELEGRAM_ENABLE_GATE" = "true" ]; then
+            for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            done
+          else
+            echo "Telegram gate disabled; skipping Telegram secret checks."
           fi
 
           if [ "$missing" -ne 0 ]; then
@@ -159,6 +176,11 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_APPROVAL_TTL_MIN: ${{ secrets.TELEGRAM_APPROVAL_TTL_MIN }}
+
         run: |
           python tay_weather_bot.py
 
