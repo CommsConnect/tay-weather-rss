@@ -1,13 +1,13 @@
 import os
 import datetime as dt
 import requests
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 
 # Secrets/env
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# TTL for pending approvals (minutes) — you already added TELEGRAM_APPROVAL_TTL_MIN as a repo secret
+# TTL for pending approvals (minutes)
 TELEGRAM_APPROVAL_TTL_MIN = int(os.getenv("TELEGRAM_APPROVAL_TTL_MIN", "60"))
 
 # For WARNING auto-approve: how long to wait after preview before posting (minutes)
@@ -39,9 +39,10 @@ def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) ->
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "disable_web_page_preview": True,
-        }
+    }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
+
     r = requests.post(_tg_api("sendMessage"), json=payload, timeout=30)
     r.raise_for_status()
 
@@ -51,6 +52,7 @@ def tg_answer_callback_query(callback_query_id: str, text: str = "") -> None:
     payload: Dict[str, Any] = {"callback_query_id": callback_query_id}
     if text:
         payload["text"] = text
+
     r = requests.post(_tg_api("answerCallbackQuery"), json=payload, timeout=30)
     r.raise_for_status()
 
@@ -60,9 +62,38 @@ def tg_get_updates(offset: Optional[int]) -> Dict[str, Any]:
     params: Dict[str, Any] = {"timeout": 0}
     if offset is not None:
         params["offset"] = offset
+
     r = requests.get(_tg_api("getUpdates"), params=params, timeout=30)
     r.raise_for_status()
     return r.json()
+
+
+def tg_send_media_group(image_urls: List[str], caption: str = "") -> None:
+    """
+    Sends up to 10 photos as a Telegram album.
+    Caption (if provided) is applied to the first photo only (Telegram limitation).
+    NOTE: Albums cannot have inline keyboards — send buttons as a separate message.
+    """
+    _require_config()
+
+    if not image_urls:
+        if caption:
+            tg_send_message(caption)
+        return
+
+    image_urls = image_urls[:10]
+
+    media: List[Dict[str, Any]] = []
+    for i, url in enumerate(image_urls):
+        item: Dict[str, Any] = {"type": "photo", "media": url}
+        if i == 0 and caption:
+            item["caption"] = caption
+        media.append(item)
+
+    payload: Dict[str, Any] = {"chat_id": TELEGRAM_CHAT_ID, "media": media}
+
+    r = requests.post(_tg_api("sendMediaGroup"), json=payload, timeout=30)
+    r.raise_for_status()
 
 
 # ----------------------------
@@ -90,7 +121,7 @@ def _minutes_remaining(created_at_z: str, ttl_min: int) -> float:
 # State structure
 # ----------------------------
 def _ensure_state_defaults(state: Dict[str, Any]) -> None:
-    # token -> {"created_at": "...Z", "preview_text": "...", "kind": "warning|watch|other", "reminded_at": "...Z"|None}
+    # token -> {"created_at": "...Z", "preview_text": "...", "kind": "...", "reminded_at": "...Z"|None}
     state.setdefault("pending_approvals", {})
     # token -> {"decision": "approved|denied", "decided_at": "...Z"}
     state.setdefault("approval_decisions", {})
@@ -200,6 +231,7 @@ def ensure_preview_sent(
     token: str,
     preview_text: str,
     kind: str,
+    image_urls: Optional[List[str]] = None,
 ) -> None:
     """
     Sends the preview exactly once (stores a pending record).
@@ -213,8 +245,20 @@ def ensure_preview_sent(
     if token in state["pending_approvals"] or token in state["approval_decisions"]:
         return
 
+    image_urls = image_urls or []
+
+    # 1) Send album/text preview (albums can't have buttons)
+    album_caption = f"{preview_text}\n\nTap buttons in the next message to approve/deny."
+    try:
+        if image_urls:
+            tg_send_media_group(image_urls=image_urls, caption=album_caption)
+        else:
+            tg_send_message(album_caption)
+    except Exception:
+        tg_send_message(album_caption)
+
+    # 2) Send buttons + token as a separate normal message
     msg = (
-        f"{preview_text}\n\n"
         f"TOKEN: {token}\n\n"
         f"Tap: ✅ Approve / 🛑 Deny\n"
         f"Or reply: /go {token} or /nogo {token}"
