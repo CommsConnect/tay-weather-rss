@@ -15,8 +15,8 @@
   "global_last_post_ts": 0,
   "pending_approvals": {},
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:20260103143011",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
+    "tag:weather.gc.ca,2013-04-16:20260103143011"
   ],
   "posted_text_hashes": [
     "fbed745e72e1bb04d2a94c73a4dc5ffd70a0eece"
