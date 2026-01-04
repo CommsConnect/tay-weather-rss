@@ -55,9 +55,8 @@ from pathlib import Path
 # ----------------------------
 # Feature toggles
 # ----------------------------
-ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
-ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
-TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
+TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
+TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
 
 # ----------------------------
 # Test mode flags (from GitHub Actions)
