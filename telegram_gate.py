@@ -35,7 +35,11 @@ def _require_config() -> None:
 
 def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
     _require_config()
-    payload: Dict[str, Any] = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    payload: Dict[str, Any] = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "disable_web_page_preview": True,
+        }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     r = requests.post(_tg_api("sendMessage"), json=payload, timeout=30)
