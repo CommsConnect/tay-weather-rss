@@ -42,9 +42,9 @@ jobs:
       # --- X posting: always allowed (schedule + manual) ---
       ENABLE_X_POSTING: true
 
-      # --- Facebook posting: DISABLED on schedule; enabled only on manual runs when explicitly chosen ---
-      ENABLE_FB_POSTING: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.post_facebook == 'true' || github.event.inputs.test_facebook == 'true') }}
-
+      # --- Facebook posting: always allowed (schedule + manual) ---
+      ENABLE_FB_POSTING: true
+      
       # --- Test flags (per platform) ---
       TEST_X: ${{ github.event.inputs.test_x || 'false' }}
       TEST_FACEBOOK: ${{ github.event.inputs.test_facebook || 'false' }}
@@ -54,7 +54,7 @@ jobs:
 
       # --- Feeds & images ---
       ALERT_FEED_URL: https://weather.gc.ca/rss/battleboard/onrm94_e.xml
-      TAY_COORDS_URL: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
+      TAY_COORDS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
       TAY_ALERTS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
       CR29_NORTH_IMAGE_URL: https://511on.ca/map/Cctv/400
       CR29_SOUTH_IMAGE_URL: https://511on.ca/map/Cctv/402
