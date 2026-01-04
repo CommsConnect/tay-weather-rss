@@ -10,17 +10,21 @@ on:
         required: false
         default: "false"
         type: choice
-        options:
-          - "false"
-          - "true"
+        options: ["false", "true"]
+
       test_facebook:
         description: "Post a TEST update to Facebook (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
         type: choice
-        options:
-          - "false"
-          - "true"
+        options: ["false", "true"]
+
+      post_facebook:
+        description: "Allow REAL Facebook posting on this manual run (normal alert flow)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
 concurrency:
   group: tay-weather-rss
@@ -35,9 +39,11 @@ jobs:
     timeout-minutes: 5
 
     env:
-      # --- Feature toggles ---
+      # --- X posting: always allowed (schedule + manual) ---
       ENABLE_X_POSTING: true
-      ENABLE_FB_POSTING: true
+
+      # --- Facebook posting: DISABLED on schedule; enabled only on manual runs when explicitly chosen ---
+      ENABLE_FB_POSTING: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.post_facebook == 'true' || github.event.inputs.test_facebook == 'true') }}
 
       # --- Test flags (per platform) ---
       TEST_X: ${{ github.event.inputs.test_x || 'false' }}
@@ -80,6 +86,7 @@ jobs:
 
       - name: Sanity check config (non-secret)
         run: |
+          echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
           echo "ENABLE_X_POSTING=$ENABLE_X_POSTING"
           echo "ENABLE_FB_POSTING=$ENABLE_FB_POSTING"
           echo "TEST_X=$TEST_X"
@@ -91,7 +98,7 @@ jobs:
           if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then echo "GOOGLE_SERVICE_ACCOUNT_JSON=set"; else echo "GOOGLE_SERVICE_ACCOUNT_JSON=missing"; fi
           if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ]; then echo "GOOGLE_DRIVE_FOLDER_ID=set"; else echo "GOOGLE_DRIVE_FOLDER_ID=missing"; fi
 
-      - name: Verify required secrets
+      - name: Verify required secrets (only what we actually need this run)
         env:
           X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
           X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
@@ -100,14 +107,17 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: |
           missing=0
 
+          # Always require X secrets (since ENABLE_X_POSTING is always true here)
           for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
             if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
           done
@@ -116,21 +126,22 @@ jobs:
             if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
           done
 
-          for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-          done
+          # Only require FB secrets if FB is enabled this run
+          if [ "$ENABLE_FB_POSTING" = "true" ]; then
+            for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
+              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            done
+          else
+            echo "FB disabled for this run; skipping FB secret checks."
+          fi
 
           if [ "$missing" -ne 0 ]; then
             echo "One or more required secrets are missing."
             exit 1
           fi
 
-            # ------------------------------------------------------------
+      # ------------------------------------------------------------
       # Run the weather bot
-      # - Fetches Environment Canada alerts
-      # - Builds images and messages
-      # - Posts to X / Facebook (or test mode)
-      # - Writes x_refresh_token_rotated.txt if X refresh token rotated
       # ------------------------------------------------------------
       - name: Run weather bot
         env:
@@ -141,8 +152,10 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
@@ -151,8 +164,6 @@ jobs:
 
       # ------------------------------------------------------------
       # Detect whether the X refresh token was rotated
-      # - Checks for x_refresh_token_rotated.txt created by the bot
-      # - Sets a step output so later steps can branch cleanly
       # ------------------------------------------------------------
       - name: Detect X refresh token rotation
         id: xrot
@@ -165,9 +176,6 @@ jobs:
 
       # ------------------------------------------------------------
       # Update the X_REFRESH_TOKEN repository secret (if rotated)
-      # - Uses a PAT via GH_TOKEN (not GITHUB_TOKEN)
-      # - Writes the new refresh token into Actions secrets
-      # - Removes the temporary token file after success
       # ------------------------------------------------------------
       - name: Update rotated X refresh token
         if: steps.xrot.outputs.rotated == 'true'
@@ -181,10 +189,6 @@ jobs:
           echo "✓ Updated X_REFRESH_TOKEN secret"
           rm -f x_refresh_token_rotated.txt
 
-      # ------------------------------------------------------------
-      # Log when no X refresh token rotation occurred
-      # - Runs only if the bot did not rotate the token
-      # ------------------------------------------------------------
       - name: No X refresh token rotation
         if: steps.xrot.outputs.rotated == 'false'
         run: |
@@ -192,8 +196,6 @@ jobs:
 
       # ------------------------------------------------------------
       # Commit generated RSS feed and state file (if changed)
-      # - Commits tay-weather.xml and state.json
-      # - Pushes only when there are actual changes
       # ------------------------------------------------------------
       - name: Commit RSS + state updates
         run: |
