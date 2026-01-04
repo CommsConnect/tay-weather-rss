@@ -725,8 +725,33 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
 
     return data, content_type
 
+def fb_load_image_bytes(ref: str) -> Tuple[bytes, str]:
+    """
+    Facebook poster image loader.
+    - If ref is a local file path, read bytes from disk.
+    - Otherwise treat ref as a URL and download it (with bug overlay when applicable).
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        raise RuntimeError("No image ref provided")
+
+    # Local file path?
+    if os.path.exists(ref):
+        with open(ref, "rb") as f:
+            data = f.read()
+
+        ext = os.path.splitext(ref)[1].lower()
+        if ext == ".png":
+            return data, "image/png"
+        if ext in (".jpg", ".jpeg"):
+            return data, "image/jpeg"
+        return data, "application/octet-stream"
+
+    # Otherwise URL
+    return download_image_bytes(ref)
+
 # Wire Facebook poster image loader (used only if non-URL refs are passed)
-fb.load_image_bytes = download_image_bytes
+fb.load_image_bytes = fb_load_image_bytes
 
 def x_upload_media(image_url: str) -> str:
     api_key = os.getenv("X_API_KEY", "").strip()
