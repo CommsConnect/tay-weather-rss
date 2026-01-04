@@ -920,6 +920,7 @@ def main() -> None:
     new_rss_items = 0
     social_posted = 0
     social_skipped_cooldown = 0
+    active_candidates = 0
     
     try:
         atom_entries = fetch_atom_entries(ALERT_FEED_URL)
@@ -959,6 +960,8 @@ def main() -> None:
             print(f"Info: non-active alert item in feed — skipping social post: {title}")
             posted.add(guid)  # prevents re-checking every run
             continue
+
+        active_candidates += 1
 
         
         if not rss_item_exists(channel, guid):
@@ -1058,6 +1061,10 @@ def main() -> None:
         # ================================
         # END TELEGRAM POLICY
         # ================================
+    
+    if active_candidates == 0:
+        print("Info: no active weather alerts — nothing to post. Exiting cleanly.")
+        return
 
 if __name__ == "__main__":
     main()
