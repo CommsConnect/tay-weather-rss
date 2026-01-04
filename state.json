@@ -1,13 +1,23 @@
 {
-  "seen_ids": [],
+  "approval_decisions": {
+    "4539eb96b8": {
+      "decided_at": "2026-01-04T21:30:28Z",
+      "decision": "approved"
+    }
+  },
+  "cooldowns": {},
+  "fb_cooldown_until": "2026-01-04T22:30:34.202201Z",
+  "fb_last_posted_at": "2026-01-04T21:30:34.202201Z",
+  "global_last_post_ts": 0,
+  "pending_approvals": {},
   "posted_guids": [],
   "posted_text_hashes": [],
-  "cooldowns": {},
-  "global_last_post_ts": 0,
-
-  "pending_approvals": {},
-  "approval_decisions": {},
-  "telegram_last_update_id": 0,
-  "telegram_last_signal": null,
-  "test_gate_token": ""
+  "seen_ids": [],
+  "telegram_last_signal": {
+    "decided_at": "2026-01-04T21:30:28Z",
+    "decision": "approved",
+    "token": "4539eb96b8"
+  },
+  "telegram_last_update_id": 259933317,
+  "test_gate_token": "4539eb96b8"
 }
