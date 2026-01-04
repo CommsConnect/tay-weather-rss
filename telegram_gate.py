@@ -34,7 +34,7 @@ def _require_config() -> None:
         raise RuntimeError("Telegram enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing")
 
 
-def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
+def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     _require_config()
     payload: Dict[str, Any] = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -46,6 +46,7 @@ def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) ->
 
     r = requests.post(_tg_api("sendMessage"), json=payload, timeout=30)
     r.raise_for_status()
+    return r.json()
 
 
 def tg_answer_callback_query(callback_query_id: str, text: str = "") -> None:
@@ -73,7 +74,7 @@ def tg_answer_callback_query_safe(
     """
     try:
         tg_answer_callback_query(callback_query_id, text=text)
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.RequestException:
         # 400 is common for stale callback queries; ignore it.
         # (We still send a normal message as the 'real' confirmation.)
         if fallback_message:
@@ -93,6 +94,27 @@ def tg_get_updates(offset: Optional[int]) -> Dict[str, Any]:
     r = requests.get(_tg_api("getUpdates"), params=params, timeout=30)
     r.raise_for_status()
     return r.json()
+
+
+def tg_edit_message_text(chat_id: str, message_id: int, text: str) -> None:
+    _require_config()
+    payload: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    r = requests.post(_tg_api("editMessageText"), json=payload, timeout=30)
+    r.raise_for_status()
+
+
+def tg_edit_message_reply_markup(chat_id: str, message_id: int, reply_markup: Optional[Dict[str, Any]]) -> None:
+    _require_config()
+    payload: Dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+    payload["reply_markup"] = reply_markup if reply_markup is not None else {"inline_keyboard": []}
+    r = requests.post(_tg_api("editMessageReplyMarkup"), json=payload, timeout=30)
+    r.raise_for_status()
+
 
 
 def tg_send_media_group(image_urls: List[str], caption: str = "") -> None:
@@ -191,22 +213,42 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
         return
 
     def _record(token: str, decision: str, decided_at: str, cb_id: Optional[str] = None) -> None:
+        # Store decision
         state["approval_decisions"][token] = {"decision": decision, "decided_at": decided_at}
         state["telegram_last_signal"] = {"token": token, "decision": decision, "decided_at": decided_at}
-        # stop reminders / mark no longer pending
-        if token in state.get("pending_approvals", {}):
-            state["pending_approvals"].pop(token, None)
-
-        # This is the *reliable* confirmation the user will see
-        signal_text = f"{'✅' if decision=='approved' else '🛑'} {decision.upper()} received for TOKEN: {token}"
-
-        # Try to ack the button (may 400 if stale), but don't fail the run.
+    
+        # Pull pending info BEFORE removing it
+        pending = (state.get("pending_approvals") or {}).get(token) or {}
+        chat_id = str(pending.get("buttons_chat_id") or TELEGRAM_CHAT_ID)
+        msg_id = int(pending.get("buttons_message_id") or 0)
+    
+        stamp = f"{'✅' if decision=='approved' else '🛑'} {decision.upper()} — TOKEN: {token}\n{decided_at}"
+    
+        # 1) Best-effort button ACK (do not fail run on 400)
         if cb_id:
-            tg_answer_callback_query_safe(cb_id, text=("Approved ✅" if decision == "approved" else "Denied 🛑"),
-                                          fallback_message=signal_text)
-        else:
-            tg_send_message(signal_text)
-
+            tg_answer_callback_query_safe(
+                cb_id,
+                text=("Approved ✅" if decision == "approved" else "Denied 🛑"),
+                fallback_message=""  # we'll do better below
+            )
+    
+        # 2) Edit the original buttons message (this is your visual confirmation)
+        edited_ok = False
+        if msg_id:
+            try:
+                tg_edit_message_text(chat_id=chat_id, message_id=msg_id, text=stamp)
+                tg_edit_message_reply_markup(chat_id=chat_id, message_id=msg_id, reply_markup=None)  # clears buttons
+                edited_ok = True
+            except Exception:
+                edited_ok = False
+    
+        # 3) Reliable fallback confirmation message if we couldn't edit
+        if not edited_ok:
+            tg_send_message(stamp)
+    
+        # 4) Now remove pending (optional, but keeps state clean)
+        state.get("pending_approvals", {}).pop(token, None)
+    
         save_fn(state)
 
     for upd in data.get("result", []):
@@ -305,13 +347,17 @@ def ensure_preview_sent(
         f"Tap: ✅ Approve / 🛑 Deny\n"
         f"Or reply: /go {token} or /nogo {token}"
     )
-    tg_send_message(msg, reply_markup=_inline_keyboard(token))
+
+    sent = tg_send_message(msg, reply_markup=_inline_keyboard(token))
+    buttons_message_id = int(((sent.get("result") or {}).get("message_id")) or 0)
 
     state["pending_approvals"][token] = {
         "created_at": _utc_now_z(),
         "preview_text": preview_text,
         "kind": kind,
         "reminded_at": None,
+        "buttons_message_id": buttons_message_id,
+        "buttons_chat_id": TELEGRAM_CHAT_ID,
     }
     save_fn(state)
 
