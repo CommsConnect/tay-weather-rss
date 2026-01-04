@@ -1,42 +1,54 @@
-name: Build + Deploy Pages (scheduled)
+name: Deploy GitHub Pages
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch:
+  push:
+    branches: ["main"]
+    # Only deploy when site files change (NOT when state.json changes)
+    paths:
+      - "index.html"
+      - "privacy.html"
+      - "assets/**"
+      - "tay/**"
+      - "tay-weather.xml"
+      - "README.md"
+      - ".nojekyll"
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
+  workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Pages
-        uses: actions/configure-pages@v5
+      # Your site is already static HTML, so we do NOT run Jekyll.
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp -r index.html privacy.html README.md assets tay tay-weather.xml _site/ 2>/dev/null || true
+          touch _site/.nojekyll
 
-      # Your site is static (index.html, assets, tay/, tay-weather.xml, etc.)
-      # No Jekyll build needed unless you *want* it.
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
