@@ -215,6 +215,13 @@ def materialize_images_for_facebook(image_urls: List[str]) -> List[str]:
         out_paths.append(p)
     return out_paths
 
+def cleanup_tmp_cam_files(paths: List[str]) -> None:
+    for p in paths or []:
+        try:
+            if isinstance(p, str) and p.startswith("/tmp/tay_cam_"):
+                os.remove(p)
+        except Exception:
+            pass
 
 # ----------------------------
 # ATOM helpers
@@ -699,7 +706,8 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
     data = r.content
 
     # Add bug for Ontario 511 cameras (CR29)
-    if "511on.ca/map/Cctv/" in image_url:
+    u = image_url.lower()
+    if "511on.ca" in u and "/cctv/" in u:
         data, content_type = apply_on511_bug(data, content_type)
 
     return data, content_type
@@ -973,7 +981,7 @@ def main() -> None:
                 token,
                 preview_text,
                 kind="other",
-                image_urls=materialize_images_for_facebook(camera_image_urls),
+                image_urls=camera_image_urls,
             )
 
             # If already decided, use it; otherwise wait in THIS run (so you don't need rerun)
@@ -1002,19 +1010,22 @@ def main() -> None:
 
         if ENABLE_FB_POSTING and TEST_FACEBOOK:
             fb_state = load_state()
-            # Tests should actually hit Facebook even if you recently posted.
             fb_state.pop("fb_cooldown_until", None)
             fb_state.pop("fb_last_posted_at", None)
-
-            fb_result = fb.safe_post_facebook(
-                fb_state,
-                caption=f"{base}\n\n(Facebook)",
-                image_urls=materialize_images_for_facebook(camera_image_urls),
-                has_new_social_event=True,
-                state_path="state.json",
-            )
-            print("FB result:", fb_result)
-
+        
+            fb_images = materialize_images_for_facebook(camera_image_urls)
+            try:
+                fb_result = fb.safe_post_facebook(
+                    fb_state,
+                    caption=f"{base}\n\n(Facebook)",
+                    image_urls=fb_images,
+                    has_new_social_event=True,
+                    state_path="state.json",
+                )
+                print("FB result:", fb_result)
+            finally:
+                cleanup_tmp_cam_files(fb_images)
+        
         return  # ✅ IMPORTANT: only return during test mode
 
     # =========================================================
@@ -1138,7 +1149,7 @@ def main() -> None:
                 token,
                 preview_text,
                 kind=alert_kind,
-                image_urls=materialize_images_for_facebook(camera_image_urls),
+                image_urls=camera_image_urls,
             )
 
             d = decision_for(state, token)
@@ -1193,15 +1204,20 @@ def main() -> None:
             posted_this = True
 
         if ENABLE_FB_POSTING:
-            fb_result = fb.safe_post_facebook(
-                state,
-                caption=social_text,
-                image_urls=materialize_images_for_facebook(camera_image_urls),
-                has_new_social_event=True,
-                state_path="state.json",
-            )
-            print("FB result:", fb_result)
-            posted_this = True
+            fb_images = materialize_images_for_facebook(camera_image_urls)
+            try:
+                fb_result = fb.safe_post_facebook(
+                    state,
+                    caption=social_text,
+                    image_urls=fb_images,
+                    has_new_social_event=True,
+                    state_path="state.json",
+                )
+                print("FB result:", fb_result)
+                posted_this = True
+            finally:
+                cleanup_tmp_cam_files(fb_images)
+
 
         if posted_this:
             posted.add(guid)
