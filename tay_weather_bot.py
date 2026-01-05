@@ -175,18 +175,21 @@ def text_hash(s: str) -> str:
 # =============================================================================
 def severity_emoji(title: str) -> str:
     """
-    Advisory = 🟡
-    Watch    = 🟠
-    Warning  = 🔴
-    Other    = ⚪
+    Environment Canada colour-coded alerts:
+      Yellow = 🟡
+      Orange = 🟠
+      Red    = 🔴
     """
     t = (title or "").lower()
-    if "warning" in t:
+
+    # Prefer explicit EC colour words if present
+    if "red" in t:
         return "🔴"
-    if "watch" in t:
+    if "orange" in t:
         return "🟠"
-    if "advisory" in t:
+    if "yellow" in t:
         return "🟡"
+
     return "⚪"
 
 
@@ -1223,7 +1226,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
-    issued_short = _issued_short(issued_raw)
 
     parts: List[str] = []
     parts.append(title_line)
@@ -1231,7 +1233,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
     parts.extend(details_lines[:2])
     parts.append("")
     parts.append(f"More: {more_url}")
-    parts.append(f"{issued_short} #TayTownship #ONStorm")
+    parts.append("#TayTownship #ONStorm")
 
     text = "\n".join([p for p in parts if p is not None])
 
@@ -1245,7 +1247,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
             details_lines[0],
             "",
             f"More: {more_url}",
-            f"{issued_short} #TayTownship #ONStorm",
         ]
         text2 = "\n".join([p for p in parts2 if p is not None])
         if len(text2) <= 280:
@@ -1255,7 +1256,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
         title_line,
         "",
         f"More: {more_url}",
-        f"{issued_short} #TayTownship #ONStorm",
     ]
     text3 = "\n".join([p for p in parts3 if p is not None])
     if len(text3) <= 280:
@@ -1271,7 +1271,6 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
 
     sev = severity_emoji(title_raw)
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
-    issued_short = _issued_short(issued_raw)
 
     details_lines: List[str] = []
     try:
@@ -1290,7 +1289,7 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
 
     parts.append("")
     parts.append(f"More: {more_url}")
-    parts.append(f"{issued_short} #TayTownship #ONStorm")
+    parts.append("#TayTownship #ONStorm")
 
     return "\n".join([p for p in parts if p is not None])
 
@@ -1494,7 +1493,9 @@ def main() -> None:
         if not guid:
             continue
 
-        title = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
+        title = normalize_alert_title(
+            atom_title_for_tay((entry.get("title") or "Weather alert").strip())
+        )
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
