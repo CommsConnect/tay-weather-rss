@@ -1478,15 +1478,19 @@ def main() -> None:
     tree, channel = load_rss_tree()
 
     try:
-        atom_entries = fetch_atom_entries(ALERT_FEED_URL)
+        feed_entries = fetch_feed_entries(ALERT_FEED_URL)
     except Exception as e:
-        print(f"⚠️ ATOM feed unavailable: {e}")
+        print(f"⚠️ Feed unavailable: {e}")
         print("Exiting cleanly; will retry on next scheduled run.")
         return
 
+    # ✅ PUT THIS RIGHT HERE (outside the loop)
+    def entry_guid(entry: dict) -> str:
+        return (entry.get("id") or entry.get("link") or "").strip()
+
     # Process newest-first
-    for entry in atom_entries:
-        guid = atom_entry_guid(entry)
+    for entry in feed_entries:
+        guid = entry_guid(entry)
         if not guid:
             continue
 
@@ -1494,6 +1498,7 @@ def main() -> None:
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
+        
         # ---------------------------------------------------------
         # Skip "ended/cancelled/no alert" entries (ALWAYS do this)
         # ---------------------------------------------------------
