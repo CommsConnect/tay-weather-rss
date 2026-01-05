@@ -1,20 +1,22 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932"
   ],
   "posted_text_hashes": [
     "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
-    "788b264da1732b8d7f5e6869a5de1afd50b85290"
+    "788b264da1732b8d7f5e6869a5de1afd50b85290",
+    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e"
   ],
   "cooldowns": {
-    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1767575762,
+    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1767639695,
     "8cba3a1a17596318031764df06a0b1df5e042d7f": 1767610573
   },
-  "global_last_post_ts": 1767610573,
+  "global_last_post_ts": 1767639695,
   "pending_approvals": {
     "9d477bc408": {
       "created_at": "2026-01-05T09:59:13Z",
@@ -53,15 +55,19 @@
     "42f5cba59f": {
       "decision": "approved",
       "decided_at": "2026-01-05T01:15:27Z"
+    },
+    "8a7345cd7a": {
+      "decision": "approved",
+      "decided_at": "2026-01-05T19:01:12Z"
     }
   },
-  "telegram_last_update_id": 259933336,
+  "telegram_last_update_id": 259933343,
   "telegram_last_signal": {
-    "token": "42f5cba59f",
+    "token": "8a7345cd7a",
     "decision": "approved",
-    "decided_at": "2026-01-05T01:15:27Z"
+    "decided_at": "2026-01-05T19:01:12Z"
   },
   "test_gate_token": "",
-  "fb_last_posted_at": "2026-01-05T10:55:48.421667Z",
-  "fb_cooldown_until": "2026-01-05T11:55:48.421667Z"
+  "fb_last_posted_at": "2026-01-05T19:01:18.268848Z",
+  "fb_cooldown_until": "2026-01-05T20:01:18.268848Z"
 }
