@@ -1,10 +1,10 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745"
   ],
   "posted_text_hashes": [
