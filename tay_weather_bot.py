@@ -344,11 +344,30 @@ def _parse_atom_dt(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def fetch_atom_entries(feed_url: str, retries: int = 3, timeout: Tuple[int, int] = (5, 20)) -> List[Dict[str, Any]]:
+def fetch_feed_entries(
+    feed_url: str,
+    retries: int = 3,
+    timeout: Tuple[int, int] = (5, 20),
+) -> List[Dict[str, Any]]:
     """
-    Fetch EC ATOM feed. Returns entries newest-first.
+    Fetch EC feed. Supports Atom (<entry>) and RSS 2.0 (<item>).
+    Returns entries newest-first with a common shape:
+      {id,title,link,summary,updated_dt}
     """
     last_err: Optional[Exception] = None
+
+    def _parse_rss_dt(s: str) -> dt.datetime:
+        s = (s or "").strip()
+        if not s:
+            return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+        try:
+            parsed = email.utils.parsedate_to_datetime(s)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt.timezone.utc)
+            return parsed.astimezone(dt.timezone.utc)
+        except Exception:
+            return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
     for attempt in range(retries):
         try:
             r = requests.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
@@ -356,42 +375,73 @@ def fetch_atom_entries(feed_url: str, retries: int = 3, timeout: Tuple[int, int]
             root = ET.fromstring(r.content)
 
             entries: List[Dict[str, Any]] = []
-            for e in root.findall("a:entry", ATOM_NS):
-                title = (e.findtext("a:title", default="", namespaces=ATOM_NS) or "").strip()
 
-                link = ""
-                link_el = e.find("a:link[@type='text/html']", ATOM_NS)
-                if link_el is None:
-                    link_el = e.find("a:link", ATOM_NS)
-                if link_el is not None:
-                    link = (link_el.get("href") or "").strip()
+            # --- Atom ---
+            if "Atom" in (root.tag or "") or root.tag.endswith("feed"):
+                for e in root.findall("a:entry", ATOM_NS):
+                    title = (e.findtext("a:title", default="", namespaces=ATOM_NS) or "").strip()
 
-                updated = (e.findtext("a:updated", default="", namespaces=ATOM_NS) or "").strip()
-                published = (e.findtext("a:published", default="", namespaces=ATOM_NS) or "").strip()
-                entry_id = (e.findtext("a:id", default="", namespaces=ATOM_NS) or "").strip()
-                summary = (e.findtext("a:summary", default="", namespaces=ATOM_NS) or "").strip()
+                    link = ""
+                    link_el = e.find("a:link[@type='text/html']", ATOM_NS)
+                    if link_el is None:
+                        link_el = e.find("a:link", ATOM_NS)
+                    if link_el is not None:
+                        link = (link_el.get("href") or "").strip()
 
-                entries.append(
-                    {
-                        "id": entry_id,
-                        "title": title,
-                        "link": link,
-                        "updated": updated,
-                        "published": published,
-                        "summary": summary,
-                        "updated_dt": _parse_atom_dt(updated or published),
-                    }
-                )
+                    updated = (e.findtext("a:updated", default="", namespaces=ATOM_NS) or "").strip()
+                    published = (e.findtext("a:published", default="", namespaces=ATOM_NS) or "").strip()
+                    entry_id = (e.findtext("a:id", default="", namespaces=ATOM_NS) or "").strip()
+                    summary = (e.findtext("a:summary", default="", namespaces=ATOM_NS) or "").strip()
 
-            entries.sort(key=lambda x: x["updated_dt"], reverse=True)
+                    entries.append(
+                        {
+                            "id": entry_id,
+                            "title": title,
+                            "link": link,
+                            "summary": summary,
+                            "updated_dt": _parse_atom_dt(updated or published),
+                        }
+                    )
+
+            # --- RSS 2.0 ---
+            else:
+                ch = root.find("channel") if root.tag == "rss" else root.find(".//channel")
+                if ch is not None:
+                    for it in ch.findall("item"):
+                        title = (it.findtext("title", default="") or "").strip()
+                        link = (it.findtext("link", default="") or "").strip()
+                        guid = (it.findtext("guid", default="") or "").strip()
+                        pub = (it.findtext("pubDate", default="") or "").strip()
+
+                        # Description can be HTML; keep raw text here
+                        desc = (it.findtext("description", default="") or "").strip()
+
+                        entries.append(
+                            {
+                                "id": guid or link or title,
+                                "title": title,
+                                "link": link,
+                                "summary": desc,
+                                "updated_dt": _parse_rss_dt(pub),
+                            }
+                        )
+
+            entries = [e for e in entries if (e.get("id") or "").strip()]
+            entries.sort(
+                key=lambda x: x.get("updated_dt")
+                or dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc),
+                reverse=True,
+            )
             return entries
+
         except Exception as e:
             last_err = e
             if attempt < retries - 1:
                 time.sleep(2 * (attempt + 1))
                 continue
             raise
-    raise last_err if last_err else RuntimeError("Failed to fetch ATOM feed")
+
+    raise last_err if last_err else RuntimeError("Failed to fetch feed")
 
 
 def atom_title_for_tay(title: str) -> str:
