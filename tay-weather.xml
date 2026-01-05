@@ -6,7 +6,10 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744</guid><pubDate>Sun, 04 Jan 2026 22:07:44 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
+<item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105035048</guid><pubDate>Mon, 05 Jan 2026 03:50:48 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
+Issued: 10:50 PM EST Sunday 4 January 2026
+More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744</guid><pubDate>Sun, 04 Jan 2026 22:07:44 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
 Issued: 5:07 PM EST Sunday 4 January 2026
 More info (Tay Township): https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>No alerts in effect (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:20260103143011</guid><pubDate>Sat, 03 Jan 2026 14:30:11 +0000</pubDate><description>No alerts in effect (Tay Township area)
