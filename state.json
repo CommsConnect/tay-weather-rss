@@ -1,22 +1,25 @@
 {
   "seen_ids": [],
   "posted_guids": [
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745"
   ],
   "posted_text_hashes": [
+    "788b264da1732b8d7f5e6869a5de1afd50b85290",
     "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20"
   ],
   "cooldowns": {
-    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1767575762
+    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1767575762,
+    "8cba3a1a17596318031764df06a0b1df5e042d7f": 1767610573
   },
-  "global_last_post_ts": 1767575762,
+  "global_last_post_ts": 1767610573,
   "pending_approvals": {
     "9d477bc408": {
       "created_at": "2026-01-05T09:59:13Z",
       "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding this afternoon.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 4:45a #TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding this afternoon.\n\nPlease take care, travel only if needed and check on neighbours who may need support.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 4:45a #TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
       "kind": "warning",
-      "reminded_at": null,
+      "reminded_at": "2026-01-05T10:55:43Z",
       "buttons_message_id": 63,
       "buttons_chat_id": "-5222293769"
     }
@@ -34,6 +37,6 @@
     "decided_at": "2026-01-05T01:15:27Z"
   },
   "test_gate_token": "",
-  "fb_last_posted_at": "2026-01-05T01:15:34.465005Z",
-  "fb_cooldown_until": "2026-01-05T02:15:34.465005Z"
+  "fb_last_posted_at": "2026-01-05T10:55:48.421667Z",
+  "fb_cooldown_until": "2026-01-05T11:55:48.421667Z"
 }
