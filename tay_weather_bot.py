@@ -1690,3 +1690,6 @@ def main() -> None:
     state["posted_guids"] = list(posted)
     state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
+
+if __name__ == "__main__":
+    main()
