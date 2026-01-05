@@ -1,7 +1,8 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745"
   ],
   "posted_text_hashes": [
     "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20"
@@ -10,7 +11,16 @@
     "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1767575762
   },
   "global_last_post_ts": 1767575762,
-  "pending_approvals": {},
+  "pending_approvals": {
+    "9d477bc408": {
+      "created_at": "2026-01-05T09:59:13Z",
+      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding this afternoon.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 4:45a #TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding this afternoon.\n\nPlease take care, travel only if needed and check on neighbours who may need support.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 4:45a #TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
+      "kind": "warning",
+      "reminded_at": null,
+      "buttons_message_id": 63,
+      "buttons_chat_id": "-5222293769"
+    }
+  },
   "approval_decisions": {
     "42f5cba59f": {
       "decision": "approved",
