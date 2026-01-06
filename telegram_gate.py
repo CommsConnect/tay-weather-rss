@@ -292,7 +292,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
             tg_answer_callback_query_safe(
                 cb_id,
                 text=("Approved ✅" if decision == "approved" else "Denied 🛑 — will not post"),
-                fallback_message=""  # we'll do better below
+                fallback_message=""
             )
 
         # 2) Edit the original buttons message (visual confirmation)
@@ -347,30 +347,22 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 _record(token=token, decision="denied", decided_at=_utc_now_z(), cb_id=cb_id)
 
             elif action == "remix":
-                # main script should detect remix_count change and regenerate care + preview
                 state["telegram_remix_count"][token] = int(state["telegram_remix_count"].get(token, 0)) + 1
                 save_fn(state)
 
-                tg_answer_callback_query_safe(
-                    cb_id,
-                    text="Remix requested 🔁",
-                    fallback_message="🔁 Remix requested — I’ll send an updated preview."
-                )
+                tg_answer_callback_query_safe(cb_id, text="Remix requested 🔁")
+                tg_send_message("🔁 Remix requested — I’ll send an updated preview with a new care statement.")
 
             elif action == "custom":
-                # start custom flow: ask for X custom first
                 state["telegram_custom_pending"] = {"token": token, "mode": "x", "created_at": _utc_now_z()}
                 save_fn(state)
 
-                tg_answer_callback_query_safe(
-                    cb_id,
-                    text="Send X custom text",
-                    fallback_message=(
-                        "✏️ Custom text\n\n"
-                        "Send the extra line you want to add to the X post.\n"
-                        "Reply /skip to skip X and set Facebook text instead.\n"
-                        "Reply /done to finish at any time."
-                    )
+                tg_answer_callback_query_safe(cb_id, text="Custom text ✏️")
+                tg_send_message(
+                    "✏️ Custom text\n\n"
+                    "Send the extra line you want to add to the X post.\n"
+                    "Reply /skip to skip X and set Facebook text instead.\n"
+                    "Reply /done to finish at any time."
                 )
 
             else:
@@ -395,7 +387,6 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
             token_pending = (pending_custom.get("token") or "").strip()
             mode = (pending_custom.get("mode") or "").strip().lower()
 
-            # only accept custom replies if token is still relevant (pending approval OR already decided)
             if token_pending:
                 if text.lower() == "/skip":
                     state["telegram_custom_pending"] = {"token": token_pending, "mode": "fb", "created_at": _utc_now_z()}
