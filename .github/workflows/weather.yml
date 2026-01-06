@@ -14,7 +14,7 @@ on:
           - "live"
           - "test_telegram_buttons_no_post"   # sends Telegram preview + buttons, never posts
           - "test_sample_alert_no_post"       # fake alert title, sends Telegram preview + buttons, never posts
-  
+
       test_alert_title:
         description: "Fake EC title (only used for test_sample_alert_no_post)"
         required: false
@@ -29,7 +29,7 @@ on:
           - "Yellow Advisory - Fog"
           - "Orange Warning - Heat"
           - "Red Warning - Cold"
-  
+
       # --- Keep your existing toggles (backward compatibility) ---
       test_x:
         description: "Post a TEST update to X (bypasses alert feed + cooldown/dedupe)"
@@ -37,14 +37,14 @@ on:
         default: "false"
         type: choice
         options: ["false", "true"]
-  
+
       test_facebook:
         description: "Post a TEST update to Facebook (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
         type: choice
         options: ["false", "true"]
-  
+
       post_facebook:
         description: "Allow REAL Facebook posting on this manual run (normal alert flow)"
         required: false
@@ -65,19 +65,25 @@ jobs:
     timeout-minutes: 5
 
     env:
-      # --- X posting: always allowed (schedule + manual) ---
+      # -------------------------------------------------------------------
+      # IMPORTANT:
+      # These are "defaults". We will OVERRIDE them per-run in a later step
+      # ("Resolve posting toggles") using $GITHUB_ENV.
+      # -------------------------------------------------------------------
       ENABLE_X_POSTING: true
-
-      # --- Facebook posting: always allowed (schedule + manual) ---
       ENABLE_FB_POSTING: true
 
       # --- Manual run mode controls ---
       RUN_MODE: ${{ github.event.inputs.run_mode || 'live' }}
       TEST_ALERT_TITLE: ${{ github.event.inputs.test_alert_title || '' }}
-      
+
       # --- Test flags (per platform) ---
       TEST_X: ${{ github.event.inputs.test_x || 'false' }}
       TEST_FACEBOOK: ${{ github.event.inputs.test_facebook || 'false' }}
+
+      # >>> INSERT HERE: manual allow-real-FB toggle (used by resolver step below)
+      POST_FACEBOOK: ${{ github.event.inputs.post_facebook || 'false' }}
+      # <<< END INSERT
 
       # Optional backward compatibility (safe to remove later)
       TEST_TWEET: ${{ github.event.inputs.test_x || 'false' }}
@@ -118,13 +124,81 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # >>> INSERT HERE: resolve final posting toggles based on RUN_MODE + inputs
+      - name: Resolve posting toggles
+        shell: bash
+        run: |
+          # -------------------------------------------------------------------
+          # This step is the single source of truth for whether we are allowed
+          # to post to X / Facebook on THIS run.
+          #
+          # Why: job-level env is static, but RUN_MODE and inputs need to
+          #      dynamically gate actual posting (especially for test_*_no_post).
+          #
+          # Rule summary:
+          #   - test_telegram_buttons_no_post  => Telegram preview/buttons ONLY, NEVER post
+          #   - test_sample_alert_no_post      => Fake alert, Telegram preview/buttons ONLY, NEVER post
+          #   - live (schedule)                => normal posting allowed
+          #   - live (manual)                  => FB posting only if POST_FACEBOOK=true (unless TEST_FACEBOOK=true)
+          #   - TEST_X / TEST_FACEBOOK         => keeps your existing per-platform test posts
+          # -------------------------------------------------------------------
+
+          echo "RUN_MODE=$RUN_MODE"
+          echo "TEST_X=$TEST_X"
+          echo "TEST_FACEBOOK=$TEST_FACEBOOK"
+          echo "POST_FACEBOOK=$POST_FACEBOOK"
+          echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
+
+          # Default: allow X and FB (matches your current behavior)
+          ENABLE_X="true"
+          ENABLE_FB="true"
+
+          # Hard stop for "no_post" modes (this is the key feature you wanted)
+          if [ "$RUN_MODE" = "test_telegram_buttons_no_post" ] || [ "$RUN_MODE" = "test_sample_alert_no_post" ]; then
+            ENABLE_X="false"
+            ENABLE_FB="false"
+          else
+            # Live modes:
+            #
+            # X: allowed by default (you currently keep it always on)
+            #     TEST_X will still work because the bot can look at TEST_X too.
+            ENABLE_X="true"
+
+            # FB: scheduled runs can post; manual runs require POST_FACEBOOK=true unless TEST_FACEBOOK=true
+            if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+              if [ "$TEST_FACEBOOK" = "true" ]; then
+                ENABLE_FB="true"
+              else
+                # Real FB posting only if you explicitly allow it on manual runs
+                if [ "$POST_FACEBOOK" = "true" ]; then
+                  ENABLE_FB="true"
+                else
+                  ENABLE_FB="false"
+                fi
+              fi
+            else
+              # schedule (or other non-manual): keep enabled
+              ENABLE_FB="true"
+            fi
+          fi
+
+          # Export final flags for downstream steps (overrides job env)
+          echo "ENABLE_X_POSTING=$ENABLE_X" >> "$GITHUB_ENV"
+          echo "ENABLE_FB_POSTING=$ENABLE_FB" >> "$GITHUB_ENV"
+
+          echo "Final: ENABLE_X_POSTING=$ENABLE_X"
+          echo "Final: ENABLE_FB_POSTING=$ENABLE_FB"
+      # <<< END INSERT
+
       - name: Sanity check config (non-secret)
         run: |
           echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
+          echo "RUN_MODE=$RUN_MODE"
           echo "ENABLE_X_POSTING=$ENABLE_X_POSTING"
           echo "ENABLE_FB_POSTING=$ENABLE_FB_POSTING"
           echo "TEST_X=$TEST_X"
           echo "TEST_FACEBOOK=$TEST_FACEBOOK"
+          echo "POST_FACEBOOK=$POST_FACEBOOK"
           echo "TAY_ALERTS_URL=$TAY_ALERTS_URL"
           echo "CONTENT_CONFIG_SOURCE=$CONTENT_CONFIG_SOURCE"
           echo "CONTENT_CONFIG_XLSX=$CONTENT_CONFIG_XLSX"
@@ -155,14 +229,19 @@ jobs:
         run: |
           missing=0
 
-          # Always require X secrets (since ENABLE_X_POSTING is always true here)
-          for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-          done
+          # >>> INSERT HERE: only require X secrets if X is enabled this run
+          if [ "$ENABLE_X_POSTING" = "true" ]; then
+            for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
+              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            done
 
-          for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-          done
+            for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
+              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            done
+          else
+            echo "X disabled for this run; skipping X secret checks."
+          fi
+          # <<< END INSERT
 
           # Only require FB secrets if FB is enabled this run
           if [ "$ENABLE_FB_POSTING" = "true" ]; then
@@ -172,7 +251,7 @@ jobs:
           else
             echo "FB disabled for this run; skipping FB secret checks."
           fi
-         
+
           # Only require Telegram secrets if Telegram gate is enabled
           if [ "$TELEGRAM_ENABLE_GATE" = "true" ]; then
             for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
