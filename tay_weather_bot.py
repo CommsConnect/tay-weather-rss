@@ -58,6 +58,9 @@
 #   TELEGRAM_PREVIEW_DELAY_MIN=<minutes before WARNING auto-posts unless denied>
 #   TELEGRAM_WAIT_SECONDS=<max seconds to wait for approval on WATCH/OTHER>
 #
+# NEW workflow env var:
+#   RUN_MODE=live|test_telegram_buttons_no_post|test_sample_alert_no_post
+#
 import base64
 import datetime as dt
 import email.utils
@@ -139,6 +142,78 @@ TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
 # Per-platform test mode (workflow_dispatch inputs set these)
 TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
 TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
+
+# =============================================================================
+# RUN MODES (hard safety gate, zero refactor)
+# =============================================================================
+# Goals:
+#   - Add explicit run modes:
+#       live -> normal scheduled behaviour (unchanged)
+#       test_telegram_buttons_no_post -> Telegram preview + buttons only, NEVER post
+#       test_sample_alert_no_post     -> Fake alert + Telegram preview + buttons only, NEVER post
+#
+#   - Hard “no-post” safety gate:
+#       Even if ENABLE_X_POSTING / ENABLE_FB_POSTING are true,
+#       and even if code tries to post, test modes cannot post.
+#
+RUN_MODE = (os.getenv("RUN_MODE", "live") or "live").strip().lower()
+
+_VALID_RUN_MODES = {
+    "live",
+    "test_telegram_buttons_no_post",
+    "test_sample_alert_no_post",
+}
+if RUN_MODE not in _VALID_RUN_MODES:
+    print(f"⚠️ Invalid RUN_MODE='{RUN_MODE}'. Falling back to 'live'.")
+    RUN_MODE = "live"
+
+# Single source of truth for “physically cannot post”
+NO_POST_MODE = RUN_MODE != "live"
+
+# IMPORTANT:
+#   These are the ONLY flags you should use when deciding to post.
+#   They preserve existing behaviour for live runs, but hard-disable in test runs.
+EFFECTIVE_ENABLE_X_POSTING = ENABLE_X_POSTING and (not NO_POST_MODE)
+EFFECTIVE_ENABLE_FB_POSTING = ENABLE_FB_POSTING and (not NO_POST_MODE)
+
+
+def _no_post_guard(platform: str) -> bool:
+    """
+    Hard safety gate.
+    Returns True if posting should be blocked.
+    """
+    if NO_POST_MODE:
+        print(f"🧯 NO-POST MODE ACTIVE ({RUN_MODE}) — blocked posting to {platform}.")
+        return True
+    return False
+
+
+def safe_post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Wrapper to guarantee test modes cannot post to X, even if a code path tries.
+    Live mode behaviour is unchanged.
+    """
+    if _no_post_guard("X"):
+        # Mimic a “dry-run” shape so callers don’t crash.
+        return {"dry_run": True, "blocked_by_run_mode": RUN_MODE}
+    return post_to_x(text, image_refs=image_refs)
+
+
+def safe_post_to_facebook(state: Dict[str, Any], caption: str, image_urls: List[str]) -> Dict[str, Any]:
+    """
+    Wrapper to guarantee test modes cannot post to Facebook, even if a code path tries.
+    Live mode behaviour is unchanged.
+    """
+    if _no_post_guard("Facebook"):
+        return {"dry_run": True, "blocked_by_run_mode": RUN_MODE}
+    return fb.safe_post_facebook(
+        state,
+        caption=caption,
+        image_urls=image_urls,
+        has_new_social_event=True,
+        state_path=STATE_PATH,
+    )
+
 
 # =============================================================================
 # Paths (repo workspace)
@@ -229,6 +304,7 @@ def severity_emoji(title: str) -> str:
         return "🟡"
 
     return ""
+
 
 def classify_alert_kind(title: str) -> str:
     """
@@ -555,7 +631,7 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             sl = s.lower()
             if "environment canada" in sl or "continue to monitor" in sl:
                 continue
-                
+
             candidate = _clean_details(s)
             if candidate:
                 return [candidate.rstrip(".") + "."]
@@ -1257,6 +1333,7 @@ def _pretty_title_for_social(title: str) -> str:
     t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
     return f"{t} in Tay Township"
 
+
 def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> str:
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
@@ -1310,7 +1387,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> s
                     return candidate2
             return text2
 
-
     # ---- fallback 2 (no details)
     parts3 = [
         title_line,
@@ -1329,6 +1405,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> s
         return text3
 
     return text[:277].rstrip() + "..."
+
 
 def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) -> str:
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
@@ -1430,55 +1507,155 @@ def main() -> None:
     except Exception as e:
         print(f"⚠️ MediaRules load failed (ignored): {e}")
 
-        # -------------------------------------------------------------------------
-    # TEST MODE (manual)
+    # -------------------------------------------------------------------------
+    # RUN MODE: TEST (Telegram-first, NO POST)
     # -------------------------------------------------------------------------
     # IMPORTANT:
-    #   This branch runs only when you manually trigger the workflow with:
-    #     TEST_X=true  and/or  TEST_FACEBOOK=true
+    #   These modes exist ONLY to test Telegram as a first-class surface:
+    #     - Always send a preview
+    #     - Always show inline buttons (Approve / Deny / Remix / Custom)
+    #     - Allow interaction testing with zero risk of public posts
+    #   And they must exit cleanly with a final Telegram confirmation.
     #
-    # Goals for this branch:
-    #   1) Send a Telegram preview + inline buttons so you can test:
-    #        ✅ Approve
-    #        🛑 Deny
-    #        🔁 Remix
-    #        ✏️ Custom
-    #   2) Only post to platforms if you actually enabled the test toggles.
-    #   3) Send a final Telegram message confirming the workflow ended cleanly.
+    if RUN_MODE in ("test_telegram_buttons_no_post", "test_sample_alert_no_post"):
+        # Baseline images for preview (safe and deterministic)
+        test_images = resolve_cr29_image_urls()
+
+        # Create a stable-ish token so repeated runs aren’t spammy,
+        # but rotate it if expired/decided.
+        st = load_state()
+
+        # Always ingest any button presses / messages since last run
+        ingest_telegram_actions(st, save_state)
+
+        # Optional: reminders near expiry (safe to call every run)
+        maybe_send_reminders(st, save_state)
+
+        token = (st.get("test_gate_token") or "").strip()
+
+        created_at = None
+        if token:
+            created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
+
+        if (
+            (not token)
+            or (created_at and is_expired(st, token))
+            or (token and decision_for(st, token) in ("approved", "denied"))
+        ):
+            token = hashlib.sha1(f"test:{RUN_MODE}:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
+            st["test_gate_token"] = token
+            save_state(st)
+
+        # Build preview content:
+        #  - "buttons only" mode can be very short
+        #  - "sample alert" mode uses your *real* formatters (no emoji logic changes)
+        if RUN_MODE == "test_telegram_buttons_no_post":
+            preview_text = (
+                "🧪 TEST MODE: Telegram buttons (NO POST)\n\n"
+                "Tap: ✅ Approve / 🛑 Deny / 🔁 Remix / ✏️ Custom\n\n"
+                f"RUN_MODE: {RUN_MODE}\n"
+                f"TOKEN: {token}"
+            )
+            kind_for_buttons = "other"
+
+        else:
+            # Fake entry: deliberately shaped like an Atom entry.
+            # Uses your existing formatting (severity emoji logic preserved).
+            fake_entry = {
+                "id": f"test-sample-{token}",
+                "title": "Yellow Advisory - Snowfall",
+                "link": TAY_COORDS_URL,  # safe, stable
+                "summary": "Test sample alert (no post).",
+                "updated_dt": dt.datetime.now(dt.timezone.utc),
+            }
+
+            # Keep care empty here (sample is focused on Telegram + format pipeline),
+            # but we still allow Custom to append.
+            x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
+            fb_text = build_facebook_post_text(fake_entry, care="", more_url=more_url)
+
+            preview_text = (
+                f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
+                f"----- X (NO POST) -----\n{x_text}\n\n"
+                f"----- Facebook (NO POST) -----\n{fb_text}\n\n"
+                f"RUN_MODE: {RUN_MODE}\n"
+                f"More:\n{more_url}\n\n"
+                f"TOKEN: {token}"
+            )
+            kind_for_buttons = classify_alert_kind(fake_entry["title"])
+
+        # Always send preview + inline buttons (Approve / Deny / Remix / Custom)
+        ensure_preview_sent(
+            st,
+            save_state,
+            token,
+            preview_text,
+            kind=kind_for_buttons,
+            image_urls=test_images,
+        )
+
+        # Wait for decision (optional). This is interaction testing.
+        d = decision_for(st, token)
+        if d not in ("approved", "denied"):
+            wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
+            d = wait_for_decision(
+                st,
+                save_state,
+                token,
+                max_wait_seconds=wait_seconds,
+                poll_interval_seconds=4,
+            )
+
+        # NOTE:
+        #   In NO-POST test modes, “approved” does not post; it only validates the flow.
+        if d == "approved":
+            try:
+                tg_send_message("✅ Test approved — confirmed: NO POST mode blocked all platform posting.")
+            except Exception:
+                pass
+        elif d == "denied":
+            try:
+                tg_send_message("🛑 Test denied — confirmed: nothing was posted.")
+            except Exception:
+                pass
+        else:
+            try:
+                tg_send_message("⏳ Test still pending — nothing posted this run.")
+            except Exception:
+                pass
+
+        # Final confirmation + clean exit (no fall-through)
+        tg_send_test_success("Telegram preview + buttons path completed (NO POST mode).")
+        return
+
+    # -------------------------------------------------------------------------
+    # LIVE MODE: Optional platform test (existing behaviour preserved)
+    # -------------------------------------------------------------------------
+    # IMPORTANT:
+    #   This branch is your existing manual “platform test” behaviour.
+    #   It remains live-only. It is NOT used by the NO-POST test modes above.
     #
-    if TEST_X or TEST_FACEBOOK:
+    if (TEST_X or TEST_FACEBOOK) and (not NO_POST_MODE):
         base = "Testing the validity of the post — please ignore ✅"
 
         # Use the same images you'd typically have available (CR-29 cams as an easy baseline).
-        # (If you want this to be Drive-first later, we can do that too.)
         test_images = resolve_cr29_image_urls()
 
         # ---------------------------------------------------------------------
         # TELEGRAM GATE (for test)
         # ---------------------------------------------------------------------
-        # We want the test to behave like the real gate:
-        #   - send preview
-        #   - let you click buttons (Approve / Deny / Remix / Custom)
-        #   - only proceed if you approve
-        #
         if TELEGRAM_ENABLE_GATE:
             st = load_state()
 
-            # Always ingest any button presses / messages since last run
             ingest_telegram_actions(st, save_state)
-
-            # Optional: reminders near expiry (safe to call every run)
             maybe_send_reminders(st, save_state)
 
-            # We reuse a stable test token so you're not spammed with a new token every run.
-            # BUT if the token is expired or already decided, we generate a fresh token.
             token = (st.get("test_gate_token") or "").strip()
 
             created_at = None
             if token:
                 created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
 
-            # If token is missing / expired / already decided -> generate a new one
             if (
                 (not token)
                 or (created_at and is_expired(st, token))
@@ -1488,7 +1665,6 @@ def main() -> None:
                 st["test_gate_token"] = token
                 save_state(st)
 
-            # Describe what this test run is trying to do
             platforms = []
             if ENABLE_X_POSTING and TEST_X:
                 platforms.append("X")
@@ -1496,11 +1672,6 @@ def main() -> None:
                 platforms.append("Facebook")
             platforms_str = " + ".join(platforms) if platforms else "None"
 
-            # NOTE:
-            #  - ensure_preview_sent() will send:
-            #      (1) a preview (album or text)
-            #      (2) a second message with inline buttons (Approve / Deny / Remix / Custom)
-            #
             preview_text = (
                 f"{base}\n\n"
                 f"Platforms (if approved): {platforms_str}\n\n"
@@ -1517,10 +1688,6 @@ def main() -> None:
                 image_urls=test_images,
             )
 
-            # -----------------------------------------------------------------
-            # WAIT FOR DECISION (test)
-            # -----------------------------------------------------------------
-            # If you haven't clicked yet, we can wait (poll Telegram) for up to TELEGRAM_WAIT_SECONDS.
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
                 wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
@@ -1532,7 +1699,6 @@ def main() -> None:
                     poll_interval_seconds=4,
                 )
 
-            # DENIED -> never post, but confirm in Telegram and exit cleanly
             if d == "denied":
                 print("Telegram: denied (test). Not posting.")
                 try:
@@ -1541,7 +1707,6 @@ def main() -> None:
                     pass
                 return
 
-            # Still pending -> do not post, confirm in Telegram, exit cleanly
             if d != "approved":
                 print("Telegram: still pending (test). Not posting this run.")
                 try:
@@ -1550,55 +1715,31 @@ def main() -> None:
                     pass
                 return
 
-            # If approved, we continue below to do optional test posting
-
         # ---------------------------------------------------------------------
         # OPTIONAL: ACTUALLY POST TEST CONTENT (only if toggles are on)
         # ---------------------------------------------------------------------
-        # This is the “real” test posting you already had:
-        # - If TEST_X is true -> post to X
-        # - If TEST_FACEBOOK is true -> post to Facebook
-        #
-        if ENABLE_X_POSTING and TEST_X:
-            post_to_x(f"{base}\n\n(X)", image_refs=test_images)
+        if EFFECTIVE_ENABLE_X_POSTING and TEST_X:
+            safe_post_to_x(f"{base}\n\n(X)", image_refs=test_images)
 
-        if ENABLE_FB_POSTING and TEST_FACEBOOK:
-            # This clears the FB cooldown, so tests don't get blocked by your spam guard.
+        if EFFECTIVE_ENABLE_FB_POSTING and TEST_FACEBOOK:
             st2 = load_state()
             st2.pop("fb_cooldown_until", None)
             st2.pop("fb_last_posted_at", None)
 
             fb_local = materialize_images_for_facebook(test_images)
             try:
-                fb_result = fb.safe_post_facebook(
+                fb_result = safe_post_to_facebook(
                     st2,
                     caption=f"{base}\n\n(Facebook)",
                     image_urls=fb_local,
-                    has_new_social_event=True,
-                    state_path=STATE_PATH,
                 )
                 print("FB result:", fb_result)
             finally:
                 cleanup_tmp_media_files(fb_local)
 
-        # ---------------------------------------------------------------------
-        # ✅ FINAL TELEGRAM CONFIRMATION (TEST)
-        # ---------------------------------------------------------------------
-        # If we reached THIS LINE, it means:
-        #   - The script did NOT crash
-        #   - Any Telegram approval requirement was satisfied (or Telegram gate disabled)
-        #   - Any optional test posting (X/FB) completed without throwing exceptions
-        #
-        # Therefore: the GitHub Action should go green,
-        # and we send a final Telegram confirmation as proof of completion.
-        #
         tg_send_test_success(
             "Remix + Custom buttons are ready — try them on the preview above."
         )
-
-        # IMPORTANT:
-        # Returning here ends the test run cleanly.
-        # This prevents the script from continuing into NORMAL MODE (real alert posting).
         return
 
     # -------------------------------------------------------------------------
@@ -1647,7 +1788,6 @@ def main() -> None:
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
-        
         # ---------------------------------------------------------
         # Skip "ended/cancelled/no alert" entries (ALWAYS do this)
         # ---------------------------------------------------------
@@ -1778,39 +1918,29 @@ def main() -> None:
             state.setdefault("telegram_last_remix_seen", {})
             last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
             current_remix = remix_count_for(state, token)
-            
+
             custom = custom_text_for(state, token)  # {"x": ..., "fb": ...}
-            
+
             needs_refresh = False
             if current_remix != last_seen:
                 needs_refresh = True
             if (custom.get("x") or custom.get("fb")):
-                # if custom exists, we should refresh preview to show it applied (or rejected for X length)
                 needs_refresh = True
-            
+
             if needs_refresh:
-                # IMPORTANT: rebuild care + text
-                # - Remix should choose a different care statement (new random pick)
-                # - Custom should be appended/validated (X <= 280, FB can be long)
-            
-                # 1) pick care again (Remix = new option)
                 care2 = ""
                 if care_rows:
                     try:
-                        # If you have a "pick_care_statement" that can avoid repeats, great.
-                        # If not, just call it again to get a new weighted random.
                         care2 = pick_care_statement(care_rows, sev, type_label)
                     except Exception:
                         care2 = ""
-            
-                # 2) rebuild texts with the newly picked care
-                x_text2 = build_x_post_text(entry, more_url=more_url)  # will try to add care only if room (we'll do next step)
+
+                x_text2 = build_x_post_text(entry, more_url=more_url)
                 fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url)
-            
-                # 3) apply custom (X constrained, FB not)
+
                 x_extra = (custom.get("x") or "").strip()
                 fb_extra = (custom.get("fb") or "").strip()
-            
+
                 x_note = ""
                 if x_extra:
                     candidate = x_text2 + "\n\n" + x_extra
@@ -1819,11 +1949,10 @@ def main() -> None:
                     else:
                         over = len(candidate) - 280
                         x_note = f"⚠️ X custom text too long by {over} chars (not applied)."
-            
+
                 if fb_extra:
                     fb_text2 = fb_text2 + "\n\n" + fb_extra
-            
-                # 4) re-send a refreshed preview (album stays, send a new text preview message)
+
                 refreshed_preview = (
                     f"🚨 {title}\n\n"
                     f"----- X (will post) -----\n{x_text2}\n\n"
@@ -1833,16 +1962,12 @@ def main() -> None:
                 )
                 if x_note:
                     refreshed_preview = x_note + "\n\n" + refreshed_preview
-            
-                # Send refreshed preview WITHOUT creating a new pending approval record.
-                # Easiest: just send a message (keep the same buttons message).
+
                 tg_send_message(refreshed_preview)
-            
-                # mark remix as handled so it doesn't spam refresh every run
+
                 state["telegram_last_remix_seen"][token] = current_remix
                 save_state(state)
 
-            
             d = decision_for(state, token)
 
             if alert_kind in ("watch", "advisory", "statement", "other"):
@@ -1872,19 +1997,17 @@ def main() -> None:
         # ---------------------------------------------------------
         posted_this = False
 
-        if ENABLE_X_POSTING:
-            post_to_x(x_text, image_refs=image_refs)
+        if EFFECTIVE_ENABLE_X_POSTING:
+            safe_post_to_x(x_text, image_refs=image_refs)
             posted_this = True
 
-        if ENABLE_FB_POSTING:
+        if EFFECTIVE_ENABLE_FB_POSTING:
             fb_images = materialize_images_for_facebook(image_refs)
             try:
-                fb.safe_post_facebook(
+                safe_post_to_facebook(
                     state,
                     caption=fb_text,
                     image_urls=fb_images,
-                    has_new_social_event=True,
-                    state_path=STATE_PATH,
                 )
                 posted_this = True
             finally:
