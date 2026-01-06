@@ -5,20 +5,46 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
+      run_mode:
+        description: "Run mode"
+        required: true
+        default: "live"
+        type: choice
+        options:
+          - "live"
+          - "test_telegram_buttons_no_post"   # sends Telegram preview + buttons, never posts
+          - "test_sample_alert_no_post"       # fake alert title, sends Telegram preview + buttons, never posts
+  
+      test_alert_title:
+        description: "Fake EC title (only used for test_sample_alert_no_post)"
+        required: false
+        default: "Yellow Warning - Snowfall"
+        type: choice
+        options:
+          - "Yellow Warning - Snowfall"
+          - "Orange Warning - Snow squalls"
+          - "Red Warning - Blizzard"
+          - "Yellow Advisory - Freezing rain"
+          - "Orange Warning - Wind"
+          - "Yellow Advisory - Fog"
+          - "Orange Warning - Heat"
+          - "Red Warning - Cold"
+  
+      # --- Keep your existing toggles (backward compatibility) ---
       test_x:
         description: "Post a TEST update to X (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
         type: choice
         options: ["false", "true"]
-
+  
       test_facebook:
         description: "Post a TEST update to Facebook (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
         type: choice
         options: ["false", "true"]
-
+  
       post_facebook:
         description: "Allow REAL Facebook posting on this manual run (normal alert flow)"
         required: false
@@ -44,6 +70,10 @@ jobs:
 
       # --- Facebook posting: always allowed (schedule + manual) ---
       ENABLE_FB_POSTING: true
+
+      # --- Manual run mode controls ---
+      RUN_MODE: ${{ github.event.inputs.run_mode || 'live' }}
+      TEST_ALERT_TITLE: ${{ github.event.inputs.test_alert_title || '' }}
       
       # --- Test flags (per platform) ---
       TEST_X: ${{ github.event.inputs.test_x || 'false' }}
