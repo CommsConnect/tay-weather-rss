@@ -89,6 +89,41 @@ from telegram_gate import (
     custom_text_for,
 )
 from telegram_gate import tg_send_message
+from telegram_gate import is_expired
+
+
+# =============================================================================
+# Telegram helper: final "test succeeded" confirmation
+# =============================================================================
+def tg_send_test_success(note: str = "") -> None:
+    """
+    Sends a final confirmation message to Telegram for MANUAL TEST RUNS.
+
+    Why:
+      - You wanted a reliable Telegram confirmation that the workflow:
+          1) ran successfully (green)
+          2) exited cleanly (no crash)
+      - This message is only sent *after* we finish the test run logic.
+
+    When it runs:
+      - Only when TELEGRAM_ENABLE_GATE is true.
+      - Only when we intentionally call it at the end of the TEST MODE path.
+
+    Safety:
+      - Wrapped in try/except so Telegram failures never fail the workflow.
+    """
+    # If Telegram is disabled, do nothing
+    if not TELEGRAM_ENABLE_GATE:
+        return
+
+    try:
+        msg = "✅ TEST COMPLETE — workflow finished and exited cleanly."
+        if note:
+            msg += f"\n{note.strip()}"
+        tg_send_message(msg)
+    except Exception as e:
+        # Never crash the workflow because Telegram couldn't send a message
+        print(f"⚠️ Telegram test success message failed: {e}")
 
 
 # =============================================================================
@@ -1395,23 +1430,55 @@ def main() -> None:
     except Exception as e:
         print(f"⚠️ MediaRules load failed (ignored): {e}")
 
-    # -------------------------------------------------------------------------
+        # -------------------------------------------------------------------------
     # TEST MODE (manual)
     # -------------------------------------------------------------------------
+    # IMPORTANT:
+    #   This branch runs only when you manually trigger the workflow with:
+    #     TEST_X=true  and/or  TEST_FACEBOOK=true
+    #
+    # Goals for this branch:
+    #   1) Send a Telegram preview + inline buttons so you can test:
+    #        ✅ Approve
+    #        🛑 Deny
+    #        🔁 Remix
+    #        ✏️ Custom
+    #   2) Only post to platforms if you actually enabled the test toggles.
+    #   3) Send a final Telegram message confirming the workflow ended cleanly.
+    #
     if TEST_X or TEST_FACEBOOK:
         base = "Testing the validity of the post — please ignore ✅"
+
+        # Use the same images you'd typically have available (CR-29 cams as an easy baseline).
+        # (If you want this to be Drive-first later, we can do that too.)
         test_images = resolve_cr29_image_urls()
 
+        # ---------------------------------------------------------------------
+        # TELEGRAM GATE (for test)
+        # ---------------------------------------------------------------------
+        # We want the test to behave like the real gate:
+        #   - send preview
+        #   - let you click buttons (Approve / Deny / Remix / Custom)
+        #   - only proceed if you approve
+        #
         if TELEGRAM_ENABLE_GATE:
             st = load_state()
+
+            # Always ingest any button presses / messages since last run
             ingest_telegram_actions(st, save_state)
+
+            # Optional: reminders near expiry (safe to call every run)
             maybe_send_reminders(st, save_state)
 
+            # We reuse a stable test token so you're not spammed with a new token every run.
+            # BUT if the token is expired or already decided, we generate a fresh token.
             token = (st.get("test_gate_token") or "").strip()
+
             created_at = None
             if token:
                 created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
 
+            # If token is missing / expired / already decided -> generate a new one
             if (
                 (not token)
                 or (created_at and is_expired(st, token))
@@ -1421,6 +1488,7 @@ def main() -> None:
                 st["test_gate_token"] = token
                 save_state(st)
 
+            # Describe what this test run is trying to do
             platforms = []
             if ENABLE_X_POSTING and TEST_X:
                 platforms.append("X")
@@ -1428,10 +1496,15 @@ def main() -> None:
                 platforms.append("Facebook")
             platforms_str = " + ".join(platforms) if platforms else "None"
 
+            # NOTE:
+            #  - ensure_preview_sent() will send:
+            #      (1) a preview (album or text)
+            #      (2) a second message with inline buttons (Approve / Deny / Remix / Custom)
+            #
             preview_text = (
                 f"{base}\n\n"
-                f"Platforms: {platforms_str}\n\n"
-                f"Tap ✅ Approve / 🛑 Deny below.\n\n"
+                f"Platforms (if approved): {platforms_str}\n\n"
+                "Tap: ✅ Approve / 🛑 Deny / 🔁 Remix / ✏️ Custom\n\n"
                 f"TOKEN: {token}"
             )
 
@@ -1444,6 +1517,10 @@ def main() -> None:
                 image_urls=test_images,
             )
 
+            # -----------------------------------------------------------------
+            # WAIT FOR DECISION (test)
+            # -----------------------------------------------------------------
+            # If you haven't clicked yet, we can wait (poll Telegram) for up to TELEGRAM_WAIT_SECONDS.
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
                 wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
@@ -1455,17 +1532,38 @@ def main() -> None:
                     poll_interval_seconds=4,
                 )
 
+            # DENIED -> never post, but confirm in Telegram and exit cleanly
             if d == "denied":
                 print("Telegram: denied (test). Not posting.")
-                return
-            if d != "approved":
-                print("Telegram: still pending (test). Not posting this run.")
+                try:
+                    tg_send_message("🛑 Test denied — confirmed: nothing was posted. Workflow exiting cleanly.")
+                except Exception:
+                    pass
                 return
 
+            # Still pending -> do not post, confirm in Telegram, exit cleanly
+            if d != "approved":
+                print("Telegram: still pending (test). Not posting this run.")
+                try:
+                    tg_send_message("⏳ Test still pending approval — nothing posted this run. Workflow exiting cleanly.")
+                except Exception:
+                    pass
+                return
+
+            # If approved, we continue below to do optional test posting
+
+        # ---------------------------------------------------------------------
+        # OPTIONAL: ACTUALLY POST TEST CONTENT (only if toggles are on)
+        # ---------------------------------------------------------------------
+        # This is the “real” test posting you already had:
+        # - If TEST_X is true -> post to X
+        # - If TEST_FACEBOOK is true -> post to Facebook
+        #
         if ENABLE_X_POSTING and TEST_X:
             post_to_x(f"{base}\n\n(X)", image_refs=test_images)
 
         if ENABLE_FB_POSTING and TEST_FACEBOOK:
+            # This clears the FB cooldown, so tests don't get blocked by your spam guard.
             st2 = load_state()
             st2.pop("fb_cooldown_until", None)
             st2.pop("fb_last_posted_at", None)
@@ -1483,6 +1581,24 @@ def main() -> None:
             finally:
                 cleanup_tmp_media_files(fb_local)
 
+        # ---------------------------------------------------------------------
+        # ✅ FINAL TELEGRAM CONFIRMATION (TEST)
+        # ---------------------------------------------------------------------
+        # If we reached THIS LINE, it means:
+        #   - The script did NOT crash
+        #   - Any Telegram approval requirement was satisfied (or Telegram gate disabled)
+        #   - Any optional test posting (X/FB) completed without throwing exceptions
+        #
+        # Therefore: the GitHub Action should go green,
+        # and we send a final Telegram confirmation as proof of completion.
+        #
+        tg_send_test_success(
+            "Remix + Custom buttons are ready — try them on the preview above."
+        )
+
+        # IMPORTANT:
+        # Returning here ends the test run cleanly.
+        # This prevents the script from continuing into NORMAL MODE (real alert posting).
         return
 
     # -------------------------------------------------------------------------
