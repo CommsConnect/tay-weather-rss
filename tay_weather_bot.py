@@ -84,10 +84,12 @@ from telegram_gate import (
     maybe_send_reminders,
     ensure_preview_sent,
     decision_for,
-    is_expired,
-    warning_delay_elapsed,
     wait_for_decision,
+    remix_count_for,
+    custom_text_for,
 )
+from telegram_gate import tg_send_message
+
 
 # =============================================================================
 # Feature toggles (controlled by GitHub Actions env)
@@ -1220,9 +1222,10 @@ def _pretty_title_for_social(title: str) -> str:
     t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
     return f"{t} in Tay Township"
 
-def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
+def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> str:
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
+    care = (care or "").strip()
 
     sev = severity_emoji(title_raw)
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
@@ -1246,10 +1249,14 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
 
     text = "\n".join([p for p in parts if p])
     if len(text) <= 280:
+        if care:
+            candidate = text + "\n\n" + care
+            if len(candidate) <= 280:
+                return candidate
         return text
 
     # ---- fallback 1 (1 detail line)
-    if len(details_lines) > 0:
+    if details_lines:
         parts2 = [
             title_line,
             "",
@@ -1262,7 +1269,12 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
 
         text2 = "\n".join([p for p in parts2 if p])
         if len(text2) <= 280:
+            if care:
+                candidate2 = text2 + "\n\n" + care
+                if len(candidate2) <= 280:
+                    return candidate2
             return text2
+
 
     # ---- fallback 2 (no details)
     parts3 = [
@@ -1275,6 +1287,10 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
 
     text3 = "\n".join([p for p in parts3 if p])
     if len(text3) <= 280:
+        if care:
+            candidate3 = text3 + "\n\n" + care
+            if len(candidate3) <= 280:
+                return candidate3
         return text3
 
     return text[:277].rstrip() + "..."
@@ -1473,6 +1489,8 @@ def main() -> None:
     # NORMAL MODE (real alerts)
     # -------------------------------------------------------------------------
     state = load_state()
+    state.setdefault("telegram_last_remix_seen", {})
+    state.setdefault("telegram_custom_text", {})
 
     # ----------------------------
     # Load CareStatements once per run (Google Sheet)
@@ -1602,7 +1620,7 @@ def main() -> None:
         # ---------------------------------------------------------
         # Build platform-specific text
         # ---------------------------------------------------------
-        x_text = build_x_post_text(entry, more_url=more_url)
+        x_text = build_x_post_text(entry, more_url=more_url, care=care)
         fb_text = build_facebook_post_text(entry, care=care, more_url=more_url)
 
         # ---------------------------------------------------------
@@ -1640,6 +1658,75 @@ def main() -> None:
                 image_urls=image_refs,
             )
 
+            # --- Handle Remix / Custom requests (rebuild preview when requested) ---
+            state.setdefault("telegram_last_remix_seen", {})
+            last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
+            current_remix = remix_count_for(state, token)
+            
+            custom = custom_text_for(state, token)  # {"x": ..., "fb": ...}
+            
+            needs_refresh = False
+            if current_remix != last_seen:
+                needs_refresh = True
+            if (custom.get("x") or custom.get("fb")):
+                # if custom exists, we should refresh preview to show it applied (or rejected for X length)
+                needs_refresh = True
+            
+            if needs_refresh:
+                # IMPORTANT: rebuild care + text
+                # - Remix should choose a different care statement (new random pick)
+                # - Custom should be appended/validated (X <= 280, FB can be long)
+            
+                # 1) pick care again (Remix = new option)
+                care2 = ""
+                if care_rows:
+                    try:
+                        # If you have a "pick_care_statement" that can avoid repeats, great.
+                        # If not, just call it again to get a new weighted random.
+                        care2 = pick_care_statement(care_rows, sev, type_label)
+                    except Exception:
+                        care2 = ""
+            
+                # 2) rebuild texts with the newly picked care
+                x_text2 = build_x_post_text(entry, more_url=more_url)  # will try to add care only if room (we'll do next step)
+                fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url)
+            
+                # 3) apply custom (X constrained, FB not)
+                x_extra = (custom.get("x") or "").strip()
+                fb_extra = (custom.get("fb") or "").strip()
+            
+                x_note = ""
+                if x_extra:
+                    candidate = x_text2 + "\n\n" + x_extra
+                    if len(candidate) <= 280:
+                        x_text2 = candidate
+                    else:
+                        over = len(candidate) - 280
+                        x_note = f"⚠️ X custom text too long by {over} chars (not applied)."
+            
+                if fb_extra:
+                    fb_text2 = fb_text2 + "\n\n" + fb_extra
+            
+                # 4) re-send a refreshed preview (album stays, send a new text preview message)
+                refreshed_preview = (
+                    f"🚨 {title}\n\n"
+                    f"----- X (will post) -----\n{x_text2}\n\n"
+                    f"----- Facebook (will post) -----\n{fb_text2}\n\n"
+                    f"Alert type: {alert_kind.upper()}\n\n"
+                    f"More:\n{more_url}"
+                )
+                if x_note:
+                    refreshed_preview = x_note + "\n\n" + refreshed_preview
+            
+                # Send refreshed preview WITHOUT creating a new pending approval record.
+                # Easiest: just send a message (keep the same buttons message).
+                tg_send_message(refreshed_preview)
+            
+                # mark remix as handled so it doesn't spam refresh every run
+                state["telegram_last_remix_seen"][token] = current_remix
+                save_state(state)
+
+            
             d = decision_for(state, token)
 
             if alert_kind in ("watch", "advisory", "statement", "other"):
