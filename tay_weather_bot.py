@@ -171,7 +171,7 @@ def text_hash(s: str) -> str:
 
 
 # =============================================================================
-# Severity emoji
+# Severity emoji (match Environment Canada alert colours)
 # =============================================================================
 def severity_emoji(title: str) -> str:
     """
@@ -179,19 +179,19 @@ def severity_emoji(title: str) -> str:
       Yellow = 🟡
       Orange = 🟠
       Red    = 🔴
+    If not colour-coded, return "" (no emoji).
     """
-    t = (title or "").lower()
+    t = (title or "").strip().lower()
 
-    # Prefer explicit EC colour words if present
-    if "red" in t:
+    # Prefer explicit colour words first (EC banner titles)
+    if t.startswith("red "):
         return "🔴"
-    if "orange" in t:
+    if t.startswith("orange "):
         return "🟠"
-    if "yellow" in t:
+    if t.startswith("yellow "):
         return "🟡"
 
-    return "⚪"
-
+    return ""
 
 def classify_alert_kind(title: str) -> str:
     """
@@ -479,16 +479,28 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
     lines = [ln for ln in lines if ln]
     text = " ".join(lines)
 
+    def _clean_details(s: str) -> str:
+        s = re.sub(r"\s+", " ", (s or "")).strip()
+        if not s:
+            return ""
+        if re.match(r"^\s*issued\b", s, flags=re.IGNORECASE):
+            return ""
+        if "continue to monitor" in s.lower():
+            return ""
+        if "share this page" in s.lower():
+            return ""
+        return s
+
     m_what = re.search(r"What:\s*(.+?)(?=\s+(When:|Where:|Additional information:))", text, re.IGNORECASE)
     m_when = re.search(r"When:\s*(.+?)(?=\s+(Where:|Additional information:)|$)", text, re.IGNORECASE)
 
     out: List[str] = []
     if m_what:
-        what = m_what.group(1).strip()
+        what = _clean_details(m_what.group(1))
         if what:
             out.append(what.rstrip(".") + ".")
     if m_when:
-        when = m_when.group(1).strip()
+        when = _clean_details(m_when.group(1))
         if when:
             out.append(when.rstrip(".") + ".")
 
@@ -506,9 +518,12 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             sl = s.lower()
             if "environment canada" in sl or "continue to monitor" in sl:
                 continue
-            return [s.rstrip(".") + "."]
-    return []
+                
+            candidate = _clean_details(s)
+            if candidate:
+                return [candidate.rstrip(".") + "."]
 
+    return []
 
 # =============================================================================
 # Google Sheet + Google Drive integration
@@ -1185,36 +1200,28 @@ def build_rss_description_from_atom(entry: Dict[str, Any], more_url: str) -> str
 # Social text formatting
 # =============================================================================
 def _pretty_title_for_social(title: str) -> str:
+    """
+    Converts EC banner title like:
+      "Yellow Warning - Snowfall"
+    into:
+      "Snowfall warning in Tay Township"
+    """
     t = (title or "").strip()
+
+    # Match: "<Colour> <Type> - <Hazard>"
+    m = re.match(r"^(yellow|orange|red)\s+(warning|watch|advisory)\s*-\s*(.+)$", t, flags=re.IGNORECASE)
+    if m:
+        alert_type = m.group(2).lower().strip()      # warning/watch/advisory
+        hazard = m.group(3).strip()                  # Snowfall
+        hazard = hazard[:1].upper() + hazard[1:] if hazard else hazard
+        return f"{hazard} {alert_type} in Tay Township"
+
+    # Fallback: remove trailing parentheses only
     t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
     return f"{t} in Tay Township"
 
-
-def _issued_short(issued: str) -> str:
-    s = (issued or "").strip()
-    s2 = re.sub(r"^Issued:\s*", "", s, flags=re.IGNORECASE).strip()
-
-    m = re.search(
-        r"(?P<h>\d{1,2}):(?P<min>\d{2})\s*(?P<ampm>AM|PM)\b.*?\b(?P<day>\d{1,2})\s+(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)\s+(?P<year>\d{4})",
-        s2,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return s
-
-    h = int(m.group("h"))
-    minute = m.group("min")
-    ampm = m.group("ampm").lower()
-    day = int(m.group("day"))
-    month = m.group("month").strip().capitalize()[:3]
-
-    suffix = "a" if ampm.startswith("a") else "p"
-    return f"Issued {month} {day} {h}:{minute}{suffix}"
-
-
 def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
-    issued_raw = (entry.get("summary") or "").strip()
     official = (entry.get("link") or "").strip()
 
     sev = severity_emoji(title_raw)
@@ -1226,47 +1233,54 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str) -> str:
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
+    # ---- primary version
+    parts = [
+        title_line,
+        "",
+        *details_lines[:2],
+        "",
+        "Environment Canada",
+        f"More: {more_url}",
+        "#TayTownship #ONStorm",
+    ]
 
-    parts: List[str] = []
-    parts.append(title_line)
-    parts.append("")
-    parts.extend(details_lines[:2])
-    parts.append("")
-    parts.append(f"More: {more_url}")
-    parts.append("#TayTownship #ONStorm")
-
-    text = "\n".join([p for p in parts if p is not None])
-
+    text = "\n".join([p for p in parts if p])
     if len(text) <= 280:
         return text
 
-    if len(details_lines) > 1:
+    # ---- fallback 1 (1 detail line)
+    if len(details_lines) > 0:
         parts2 = [
             title_line,
             "",
             details_lines[0],
             "",
+            "Environment Canada",
             f"More: {more_url}",
+            "#TayTownship #ONStorm",
         ]
-        text2 = "\n".join([p for p in parts2 if p is not None])
+
+        text2 = "\n".join([p for p in parts2 if p])
         if len(text2) <= 280:
             return text2
 
+    # ---- fallback 2 (no details)
     parts3 = [
         title_line,
         "",
+        "Environment Canada",
         f"More: {more_url}",
+        "#TayTownship #ONStorm",
     ]
-    text3 = "\n".join([p for p in parts3 if p is not None])
+
+    text3 = "\n".join([p for p in parts3 if p])
     if len(text3) <= 280:
         return text3
 
     return text[:277].rstrip() + "..."
 
-
 def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) -> str:
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
-    issued_raw = (entry.get("summary") or "").strip()
     official = (entry.get("link") or "").strip()
 
     sev = severity_emoji(title_raw)
@@ -1288,11 +1302,11 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
         parts.append(care.strip())
 
     parts.append("")
+    parts.append("Environment Canada")
     parts.append(f"More: {more_url}")
     parts.append("#TayTownship #ONStorm")
 
-    return "\n".join([p for p in parts if p is not None])
-
+    return "\n".join([p for p in parts if p])
 
 # =============================================================================
 # Image selection policy
