@@ -1,3 +1,18 @@
+# telegram_gate.py
+#
+# Telegram approve/deny gate + remix/custom controls
+# - ✅ Approve: records approved + edits buttons message to confirm
+# - 🛑 Deny: records denied + edits buttons message to confirm "will NOT post"
+# - 🔁 Remix: increments a counter for that token (your main script should regenerate care + re-preview)
+# - ✏️ Custom: collects custom text via chat:
+#     1) X custom (validated in your main script against 280)
+#     2) FB custom (can be longer)
+#   Use /skip to skip X custom and go straight to FB, /done to finish without FB custom.
+#
+# NOTE:
+# - This module stores remix/custom requests in state.
+# - Your main script must read the state and rebuild preview texts accordingly.
+
 import os
 import time
 import datetime as dt
@@ -75,8 +90,6 @@ def tg_answer_callback_query_safe(
     try:
         tg_answer_callback_query(callback_query_id, text=text)
     except requests.exceptions.RequestException:
-        # 400 is common for stale callback queries; ignore it.
-        # (We still send a normal message as the 'real' confirmation.)
         if fallback_message:
             try:
                 tg_send_message(fallback_message)
@@ -114,7 +127,6 @@ def tg_edit_message_reply_markup(chat_id: str, message_id: int, reply_markup: Op
     payload["reply_markup"] = reply_markup if reply_markup is not None else {"inline_keyboard": []}
     r = requests.post(_tg_api("editMessageReplyMarkup"), json=payload, timeout=30)
     r.raise_for_status()
-
 
 
 def tg_send_media_group(image_urls: List[str], caption: str = "") -> None:
@@ -170,7 +182,8 @@ def _minutes_remaining(created_at_z: str, ttl_min: int) -> float:
 # State structure
 # ----------------------------
 def _ensure_state_defaults(state: Dict[str, Any]) -> None:
-    # token -> {"created_at": "...Z", "preview_text": "...", "kind": "...", "reminded_at": "...Z"|None}
+    # token -> {"created_at": "...Z", "preview_text": "...", "kind": "...", "reminded_at": "...Z"|None,
+    #           "buttons_message_id": int, "buttons_chat_id": str}
     state.setdefault("pending_approvals", {})
     # token -> {"decision": "approved|denied", "decided_at": "...Z"}
     state.setdefault("approval_decisions", {})
@@ -179,6 +192,16 @@ def _ensure_state_defaults(state: Dict[str, Any]) -> None:
     # {"token": "...", "decision": "approved|denied", "decided_at": "...Z"}
     state.setdefault("telegram_last_signal", None)
 
+    # Remix requests: token -> int (increment each time Remix pressed)
+    state.setdefault("telegram_remix_count", {})
+
+    # Custom text capture flow:
+    # {"token": "...", "mode": "x"|"fb", "created_at": "...Z"} or None
+    state.setdefault("telegram_custom_pending", None)
+
+    # token -> {"x": "text"|None, "fb": "text"|None}
+    state.setdefault("telegram_custom_text", {})
+
 
 def _inline_keyboard(token: str) -> Dict[str, Any]:
     return {
@@ -186,9 +209,40 @@ def _inline_keyboard(token: str) -> Dict[str, Any]:
             [
                 {"text": "✅ Approve", "callback_data": f"go:{token}"},
                 {"text": "🛑 Deny", "callback_data": f"no:{token}"},
-            ]
+            ],
+            [
+                {"text": "🔁 Remix", "callback_data": f"remix:{token}"},
+                {"text": "✏️ Custom", "callback_data": f"custom:{token}"},
+            ],
         ]
     }
+
+
+# ----------------------------
+# Public helper accessors (main script can use these)
+# ----------------------------
+def remix_count_for(state: Dict[str, Any], token: str) -> int:
+    _ensure_state_defaults(state)
+    try:
+        return int((state.get("telegram_remix_count") or {}).get(token, 0))
+    except Exception:
+        return 0
+
+
+def custom_text_for(state: Dict[str, Any], token: str) -> Dict[str, Optional[str]]:
+    _ensure_state_defaults(state)
+    rec = (state.get("telegram_custom_text") or {}).get(token)
+    if isinstance(rec, dict):
+        return {"x": rec.get("x"), "fb": rec.get("fb")}
+    return {"x": None, "fb": None}
+
+
+def clear_custom_text(state: Dict[str, Any], token: str) -> None:
+    _ensure_state_defaults(state)
+    (state.get("telegram_custom_text") or {}).pop(token, None)
+    pending = state.get("telegram_custom_pending")
+    if isinstance(pending, dict) and (pending.get("token") == token):
+        state["telegram_custom_pending"] = None
 
 
 # ----------------------------
@@ -197,8 +251,11 @@ def _inline_keyboard(token: str) -> Dict[str, Any]:
 def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, Any]], None]) -> None:
     """
     Reads Telegram updates and records decisions from:
-      - inline buttons: go:<token>, no:<token>
+      - inline buttons: go:<token>, no:<token>, remix:<token>, custom:<token>
       - commands: /go <token>, /nogo <token>
+      - custom flow text capture (when custom mode is active for a token):
+          /skip (skip X custom, go to FB custom)
+          /done (finish custom flow)
     """
     if not _config_ok():
         return
@@ -216,23 +273,29 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
         # Store decision
         state["approval_decisions"][token] = {"decision": decision, "decided_at": decided_at}
         state["telegram_last_signal"] = {"token": token, "decision": decision, "decided_at": decided_at}
-    
+
         # Pull pending info BEFORE removing it
         pending = (state.get("pending_approvals") or {}).get(token) or {}
         chat_id = str(pending.get("buttons_chat_id") or TELEGRAM_CHAT_ID)
         msg_id = int(pending.get("buttons_message_id") or 0)
-    
-        stamp = f"{'✅' if decision=='approved' else '🛑'} {decision.upper()} — TOKEN: {token}\n{decided_at}"
-    
+
+        if decision == "denied":
+            stamp = (
+                "🛑 DENIED — Confirmed: this alert will NOT be posted.\n"
+                f"TOKEN: {token}\n{decided_at}"
+            )
+        else:
+            stamp = f"✅ APPROVED — TOKEN: {token}\n{decided_at}"
+
         # 1) Best-effort button ACK (do not fail run on 400)
         if cb_id:
             tg_answer_callback_query_safe(
                 cb_id,
-                text=("Approved ✅" if decision == "approved" else "Denied 🛑"),
+                text=("Approved ✅" if decision == "approved" else "Denied 🛑 — will not post"),
                 fallback_message=""  # we'll do better below
             )
-    
-        # 2) Edit the original buttons message (this is your visual confirmation)
+
+        # 2) Edit the original buttons message (visual confirmation)
         edited_ok = False
         if msg_id:
             try:
@@ -241,14 +304,14 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 edited_ok = True
             except Exception:
                 edited_ok = False
-    
+
         # 3) Reliable fallback confirmation message if we couldn't edit
         if not edited_ok:
             tg_send_message(stamp)
-    
-        # 4) Now remove pending (optional, but keeps state clean)
+
+        # 4) Now remove pending (keeps state clean)
         state.get("pending_approvals", {}).pop(token, None)
-    
+
         save_fn(state)
 
     for upd in data.get("result", []):
@@ -274,17 +337,47 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 continue
 
             action, token = cb_data.split(":", 1)
+            action = action.strip().lower()
             token = token.strip()
 
             if action == "go":
                 _record(token=token, decision="approved", decided_at=_utc_now_z(), cb_id=cb_id)
+
             elif action == "no":
                 _record(token=token, decision="denied", decided_at=_utc_now_z(), cb_id=cb_id)
+
+            elif action == "remix":
+                # main script should detect remix_count change and regenerate care + preview
+                state["telegram_remix_count"][token] = int(state["telegram_remix_count"].get(token, 0)) + 1
+                save_fn(state)
+
+                tg_answer_callback_query_safe(
+                    cb_id,
+                    text="Remix requested 🔁",
+                    fallback_message="🔁 Remix requested — I’ll send an updated preview."
+                )
+
+            elif action == "custom":
+                # start custom flow: ask for X custom first
+                state["telegram_custom_pending"] = {"token": token, "mode": "x", "created_at": _utc_now_z()}
+                save_fn(state)
+
+                tg_answer_callback_query_safe(
+                    cb_id,
+                    text="Send X custom text",
+                    fallback_message=(
+                        "✏️ Custom text\n\n"
+                        "Send the extra line you want to add to the X post.\n"
+                        "Reply /skip to skip X and set Facebook text instead.\n"
+                        "Reply /done to finish at any time."
+                    )
+                )
+
             else:
                 tg_answer_callback_query_safe(cb_id, "Unknown action.")
             continue
 
-        # Text commands fallback
+        # Text messages / commands
         msg = upd.get("message") or {}
         chat = msg.get("chat") or {}
         chat_id = str(chat.get("id", ""))
@@ -296,6 +389,50 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
         if not text:
             continue
 
+        # ---------- Custom text capture ----------
+        pending_custom = state.get("telegram_custom_pending")
+        if pending_custom and isinstance(pending_custom, dict):
+            token_pending = (pending_custom.get("token") or "").strip()
+            mode = (pending_custom.get("mode") or "").strip().lower()
+
+            # only accept custom replies if token is still relevant (pending approval OR already decided)
+            if token_pending:
+                if text.lower() == "/skip":
+                    state["telegram_custom_pending"] = {"token": token_pending, "mode": "fb", "created_at": _utc_now_z()}
+                    save_fn(state)
+                    tg_send_message(
+                        "OK — now send custom Facebook-only text (optional, can be longer). "
+                        "Reply /done to skip."
+                    )
+                    continue
+
+                if text.lower() == "/done":
+                    state["telegram_custom_pending"] = None
+                    save_fn(state)
+                    tg_send_message("Custom text saved. I’ll refresh the preview on the next run.")
+                    continue
+
+                state.setdefault("telegram_custom_text", {})
+                state["telegram_custom_text"].setdefault(token_pending, {"x": None, "fb": None})
+
+                if mode == "x":
+                    state["telegram_custom_text"][token_pending]["x"] = text
+                    state["telegram_custom_pending"] = {"token": token_pending, "mode": "fb", "created_at": _utc_now_z()}
+                    save_fn(state)
+                    tg_send_message(
+                        "Got it. Now send custom Facebook-only text (optional, can be longer). "
+                        "Or reply /done to skip."
+                    )
+                    continue
+
+                if mode == "fb":
+                    state["telegram_custom_text"][token_pending]["fb"] = text
+                    state["telegram_custom_pending"] = None
+                    save_fn(state)
+                    tg_send_message("Got it. I’ll refresh the preview on the next run.")
+                    continue
+
+        # ---------- Approve/deny commands fallback ----------
         parts = text.split()
         cmd = parts[0].lower()
         if cmd not in ("/go", "/nogo"):
@@ -344,8 +481,9 @@ def ensure_preview_sent(
     # 2) Send buttons + token as a separate normal message
     msg = (
         f"TOKEN: {token}\n\n"
-        f"Tap: ✅ Approve / 🛑 Deny\n"
-        f"Or reply: /go {token} or /nogo {token}"
+        "Tap: ✅ Approve / 🛑 Deny / 🔁 Remix / ✏️ Custom\n"
+        f"Or reply: /go {token} or /nogo {token}\n\n"
+        "Custom tips: send text when prompted • /skip • /done"
     )
 
     sent = tg_send_message(msg, reply_markup=_inline_keyboard(token))
@@ -418,7 +556,8 @@ def maybe_send_reminders(state: Dict[str, Any], save_fn: Callable[[Dict[str, Any
             rec["reminded_at"] = _utc_now_z()
             changed = True
             tg_send_message(
-                f"⏰ Reminder: approval still pending\nTOKEN: {token}\n~{int(max(0, remaining))} min remaining\n\nReply with ✅ Approve or 🛑 Deny."
+                f"⏰ Reminder: approval still pending\nTOKEN: {token}\n~{int(max(0, remaining))} min remaining\n\n"
+                "Tap ✅ Approve / 🛑 Deny / 🔁 Remix / ✏️ Custom"
             )
 
     if changed:
