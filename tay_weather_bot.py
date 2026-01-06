@@ -129,6 +129,32 @@ def tg_send_test_success(note: str = "") -> None:
         print(f"⚠️ Telegram test success message failed: {e}")
 
 
+def warning_delay_elapsed(state: Dict[str, Any], token: str) -> bool:
+    """
+    WARNING policy:
+      - Wait TELEGRAM_PREVIEW_DELAY_MIN minutes after preview was created,
+        unless denied.
+    Minimal implementation so the existing call sites work.
+    """
+    delay_min = int(os.getenv("TELEGRAM_PREVIEW_DELAY_MIN", "15"))
+    pending = (state.get("pending_approvals") or {}).get(token) or {}
+    created_at = pending.get("created_at")
+
+    if not created_at:
+        # If we don't know when it was created, allow immediately (fails open)
+        return True
+
+    try:
+        created_ts = int(created_at)
+    except Exception:
+        try:
+            created_ts = int(float(created_at))
+        except Exception:
+            return True
+
+    return (int(time.time()) - created_ts) >= (delay_min * 60)
+
+
 # =============================================================================
 # Feature toggles (controlled by GitHub Actions env)
 # =============================================================================
@@ -1340,7 +1366,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> s
     care = (care or "").strip()
 
     sev = severity_emoji(title_raw)
-    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
+    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
     try:
@@ -1412,7 +1438,7 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
     official = (entry.get("link") or "").strip()
 
     sev = severity_emoji(title_raw)
-    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}"
+    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
     try:
@@ -1472,6 +1498,15 @@ def choose_images_for_alert(
         print(f"⚠️ Camera fallback failed: {e}")
         return []
 
+def normalize_alert_title(title: str) -> str:
+    """
+    Minimal normalizer for consistent comparisons and formatting.
+    Keeps your severity emoji behaviour unchanged (does NOT add/remove colours).
+    """
+    t = (title or "").strip()
+    t = t.replace("–", "-").replace("—", "-")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
 # =============================================================================
 # Main routine
@@ -1518,6 +1553,10 @@ def main() -> None:
     #   And they must exit cleanly with a final Telegram confirmation.
     #
     if RUN_MODE in ("test_telegram_buttons_no_post", "test_sample_alert_no_post"):
+        if not TELEGRAM_ENABLE_GATE:
+            print("RUN_MODE is a Telegram test mode, but TELEGRAM_ENABLE_GATE=false. Exiting cleanly.")
+            return
+
         # Baseline images for preview (safe and deterministic)
         test_images = resolve_cr29_image_urls()
 
