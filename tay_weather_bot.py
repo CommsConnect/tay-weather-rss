@@ -720,15 +720,15 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
 
     def norm_colour(c: str) -> str:
         c = (c or "").strip().lower()
-        if c in ("🔴", "red", "warning"):
+        if c in ("🔴", "red"):
             return "🔴"
-        if c in ("🟠", "orange", "watch"):
+        if c in ("🟠", "orange"):
             return "🟠"
-        if c in ("🟡", "yellow", "advisory"):
+        if c in ("🟡", "yellow"):
             return "🟡"
-        if c in ("⚪", "white", "other", "statement"):
+        if c in ("⚪", "white"):
             return "⚪"
-        return (c or "").strip()
+        return ""
 
     want_type = (alert_type or "").strip().lower()
     want_colour = norm_colour((colour or "").strip())
@@ -750,7 +750,7 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
     ]
 
     for bc, bt in buckets:
-        for r in care_rows:
+        for r in (care_rows or []):
             if not enabled(r):
                 continue
             if matches(r, bc, bt):
@@ -758,6 +758,87 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
                 if txt:
                     return txt
     return ""
+
+
+def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str) -> List[str]:
+    """
+    Return ALL enabled care texts that match, in the same priority order
+    as pick_care_statement(). This enables Remix to choose a different one.
+    """
+    def enabled(r: dict) -> bool:
+        return str(r.get("enabled", "")).strip().lower() in ("true", "yes", "1", "y")
+
+    def norm_colour(c: str) -> str:
+        c = (c or "").strip().lower()
+        if c in ("🔴", "red"):
+            return "🔴"
+        if c in ("🟠", "orange"):
+            return "🟠"
+        if c in ("🟡", "yellow"):
+            return "🟡"
+        if c in ("⚪", "white"):
+            return "⚪"
+        return ""
+
+    want_type = (alert_type or "").strip().lower()
+    want_colour = norm_colour((colour or "").strip())
+
+    def matches(r: dict, c_req: str, t_req: str) -> bool:
+        rc = norm_colour((r.get("colour") or "").strip())
+        rt = (r.get("type") or "").strip().lower()
+        if c_req and rc != c_req:
+            return False
+        if t_req and rt != t_req:
+            return False
+        return True
+
+    buckets = [
+        (want_colour, want_type),
+        ("", want_type),
+        (want_colour, ""),
+        ("", ""),
+    ]
+
+    out: List[str] = []
+    seen = set()
+
+    for bc, bt in buckets:
+        for r in (care_rows or []):
+            if not enabled(r):
+                continue
+            if not matches(r, bc, bt):
+                continue
+            txt = (r.get("text") or "").strip()
+            if txt and txt not in seen:
+                out.append(txt)
+                seen.add(txt)
+
+    return out
+
+
+def pick_remixed_care_text(
+    care_rows: List[dict],
+    colour: str,
+    alert_type: str,
+    current_care_text: str,
+    remix_count: int,
+) -> str:
+    """
+    Remix picks a different care statement (when possible), cycling by remix_count.
+    """
+    candidates = list_matching_care_texts(care_rows, colour, alert_type)
+    cur = (current_care_text or "").strip()
+
+    if cur:
+        filtered = [c for c in candidates if c.strip() != cur]
+        if filtered:
+            candidates = filtered
+
+    if not candidates:
+        return cur
+
+    idx = abs(int(remix_count)) % len(candidates)
+    return candidates[idx].strip()
 
 
 def load_media_rules_rows() -> List[dict]:
@@ -1360,11 +1441,12 @@ def _pretty_title_for_social(title: str) -> str:
     return f"{t} in Tay Township"
 
 
-def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> str:
+def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
+    # Use custom text from Telegram if available, otherwise use spreadsheet care
+    care_to_add = (custom_x if custom_x else care).strip()
+    
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
-    care = (care or "").strip()
-
     sev = severity_emoji(title_raw)
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
@@ -1374,63 +1456,46 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "") -> s
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
-    # ---- primary version
-    parts = [
-        title_line,
-        "",
-        *details_lines[:2],
-        "",
-        "Environment Canada",
-        f"More: {more_url}",
-        "#TayTownship #ONStorm",
-    ]
+    # ---------------------------------------------------------
+    # STEP 1: Attempt Maximum Details (2 lines)
+    # ---------------------------------------------------------
+    parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
+    text_max = "\n".join([p for p in parts_max if p])
 
-    text = "\n".join([p for p in parts if p])
-    if len(text) <= 280:
-        if care:
-            candidate = text + "\n\n" + care
+    if len(text_max) <= 280:
+        if care_to_add:
+            candidate = text_max + "\n\n" + care_to_add
+            if len(candidate) <= 280:
+                return candidate  # Fits with 2 details + Care
+        return text_max  # Fits with 2 details (Care too long or empty)
+
+    # ---------------------------------------------------------
+    # STEP 2: Fallback to 1 Detail Line
+    # ---------------------------------------------------------
+    if details_lines:
+        parts_med = [title_line, "", details_lines[0], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
+        text_med = "\n".join([p for p in parts_med if p])
+        if len(text_med) <= 280:
+            if care_to_add:
+                candidate = text_med + "\n\n" + care_to_add
+                if len(candidate) <= 280:
+                    return candidate  # Fits with 1 detail + Care
+            return text_med  # Fits with 1 detail
+
+    # ---------------------------------------------------------
+    # STEP 3: Fallback to No Details (Title/Links only)
+    # ---------------------------------------------------------
+    parts_min = [title_line, "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
+    text_min = "\n".join([p for p in parts_min if p])
+    if len(text_min) <= 280:
+        if care_to_add:
+            candidate = text_min + "\n\n" + care_to_add
             if len(candidate) <= 280:
                 return candidate
-        return text
+        return text_min
 
-    # ---- fallback 1 (1 detail line)
-    if details_lines:
-        parts2 = [
-            title_line,
-            "",
-            details_lines[0],
-            "",
-            "Environment Canada",
-            f"More: {more_url}",
-            "#TayTownship #ONStorm",
-        ]
-
-        text2 = "\n".join([p for p in parts2 if p])
-        if len(text2) <= 280:
-            if care:
-                candidate2 = text2 + "\n\n" + care
-                if len(candidate2) <= 280:
-                    return candidate2
-            return text2
-
-    # ---- fallback 2 (no details)
-    parts3 = [
-        title_line,
-        "",
-        "Environment Canada",
-        f"More: {more_url}",
-        "#TayTownship #ONStorm",
-    ]
-
-    text3 = "\n".join([p for p in parts3 if p])
-    if len(text3) <= 280:
-        if care:
-            candidate3 = text3 + "\n\n" + care
-            if len(candidate3) <= 280:
-                return candidate3
-        return text3
-
-    return text[:277].rstrip() + "..."
+    # Final hard safety truncate if even the title/links are too long
+    return text_min[:277].rstrip() + "..."
 
 
 def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) -> str:
@@ -1462,9 +1527,9 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
 
     return "\n".join([p for p in parts if p])
 
-# =============================================================================
-# Image selection policy
-# =============================================================================
+    # =============================================================================
+    # Image selection policy
+    # =============================================================================
 def choose_images_for_alert(
     drive_svc: Optional[Any],
     drive_folder_id: str,
@@ -1883,8 +1948,15 @@ def main() -> None:
         # ---------------------------------------------------------
         # Build alert type label + severity
         # ---------------------------------------------------------
-        type_label = re.sub(r"\s*\(.*?\)\s*$", "", title).strip().lower()
-        sev = severity_emoji(title)
+        title_raw = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
+
+        # type_label is TYPE (warning/watch/advisory/statement), not colour
+        type_label = re.sub(r"\s*\(.*?\)\s*$", "", title_raw).strip().lower()
+        
+        # sev is COLOUR (🟡🟠🔴) derived from EC banner prefix; do not change severity_emoji()
+        sev = severity_emoji(title_raw)
+
+
 
         # ---------------------------------------------------------
         # CARE STATEMENT (Facebook only)
@@ -1958,28 +2030,42 @@ def main() -> None:
             last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
             current_remix = remix_count_for(state, token)
 
-            custom = custom_text_for(state, token)  # {"x": ..., "fb": ...}
+            custom = custom_text_for(state, token) or {}  # {"x": ..., "fb": ...}
 
             needs_refresh = False
+            state.setdefault("telegram_last_remix_seen", {})
+            last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
+            current_remix = remix_count_for(state, token)
+            
+            x_extra = (custom.get("x") or "").strip()
+            fb_extra = (custom.get("fb") or "").strip()
+            
             if current_remix != last_seen:
                 needs_refresh = True
-            if (custom.get("x") or custom.get("fb")):
+            if x_extra or fb_extra:
                 needs_refresh = True
-
+            
             if needs_refresh:
-                care2 = ""
-                if care_rows:
+                # --- CARE: remix chooses another valid care when possible ---
+                care2 = care
+                if care_rows and (current_remix != last_seen):
                     try:
-                        care2 = pick_care_statement(care_rows, sev, type_label)
-                    except Exception:
-                        care2 = ""
-
-                x_text2 = build_x_post_text(entry, more_url=more_url)
+                        care2 = pick_remixed_care_text(
+                            care_rows=care_rows,
+                            colour=sev,
+                            alert_type=type_label,
+                            current_care_text=care,
+                            remix_count=current_remix,
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Care remix failed: {e}")
+                        care2 = care
+            
+                # Rebuild texts using care2
+                x_text2 = build_x_post_text(entry, more_url=more_url, care=care2)
                 fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url)
-
-                x_extra = (custom.get("x") or "").strip()
-                fb_extra = (custom.get("fb") or "").strip()
-
+            
+                # Apply custom extras (append-if-fits for X; always append for FB)
                 x_note = ""
                 if x_extra:
                     candidate = x_text2 + "\n\n" + x_extra
@@ -1988,25 +2074,31 @@ def main() -> None:
                     else:
                         over = len(candidate) - 280
                         x_note = f"⚠️ X custom text too long by {over} chars (not applied)."
-
+            
                 if fb_extra:
                     fb_text2 = fb_text2 + "\n\n" + fb_extra
-
+            
+                # ✅ IMPORTANT: what we preview is what we will post
+                care = care2
+                x_text = x_text2
+                fb_text = fb_text2
+            
                 refreshed_preview = (
                     f"🚨 {title}\n\n"
-                    f"----- X (will post) -----\n{x_text2}\n\n"
-                    f"----- Facebook (will post) -----\n{fb_text2}\n\n"
+                    f"----- X (will post) -----\n{x_text}\n\n"
+                    f"----- Facebook (will post) -----\n{fb_text}\n\n"
                     f"Alert type: {alert_kind.upper()}\n\n"
                     f"More:\n{more_url}"
                 )
                 if x_note:
                     refreshed_preview = x_note + "\n\n" + refreshed_preview
-
+            
                 tg_send_message(refreshed_preview)
-
+            
                 state["telegram_last_remix_seen"][token] = current_remix
                 save_state(state)
 
+            
             d = decision_for(state, token)
 
             if alert_kind in ("watch", "advisory", "statement", "other"):
@@ -2030,6 +2122,13 @@ def main() -> None:
                     continue
                 if not warning_delay_elapsed(state, token):
                     continue
+
+        # Recompute hash after any Telegram refresh (remix/custom can change x_text)
+        h = text_hash(x_text)
+        if h in posted_text_hashes:
+            print("Social skipped: duplicate text hash already posted (after refresh)")
+            posted.add(guid)
+            continue
 
         # ---------------------------------------------------------
         # Post now
