@@ -93,10 +93,84 @@ from telegram_gate import (
     remix_count_for,
     custom_text_for,
     clear_custom_text,
-    wait_for_decision,
+    wait_for_decision,  # ✅ FIX: ensure this is imported (prevents NameError)
+    is_expired,
+    tg_send_message,
 )
-from telegram_gate import tg_send_message
-from telegram_gate import is_expired
+
+# =============================================================================
+# Feature toggles (controlled by GitHub Actions env)
+# =============================================================================
+ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
+ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
+TELEGRAM_ENABLE_GATE = os.getenv("TELEGRAM_ENABLE_GATE", "true").lower() == "true"
+
+# Legacy compatibility: TEST_TWEET implies X test
+TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
+
+# Per-platform test mode (workflow_dispatch inputs set these)
+TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
+TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
+
+# =============================================================================
+# RUN MODES (hard safety gate)
+# =============================================================================
+RUN_MODE = (os.getenv("RUN_MODE", "live") or "live").strip().lower()
+
+_VALID_RUN_MODES = {
+    "live",
+    "test_telegram_buttons_no_post",
+    "test_sample_alert_no_post",
+}
+if RUN_MODE not in _VALID_RUN_MODES:
+    print(f"⚠️ Invalid RUN_MODE='{RUN_MODE}'. Falling back to 'live'.")
+    RUN_MODE = "live"
+
+# Single source of truth for “physically cannot post”
+NO_POST_MODE = RUN_MODE != "live"
+
+# IMPORTANT:
+#   These are the ONLY flags you should use when deciding to post.
+EFFECTIVE_ENABLE_X_POSTING = ENABLE_X_POSTING and (not NO_POST_MODE)
+EFFECTIVE_ENABLE_FB_POSTING = ENABLE_FB_POSTING and (not NO_POST_MODE)
+
+# =============================================================================
+# Paths (repo workspace)
+# =============================================================================
+STATE_PATH = "state.json"
+RSS_PATH = "tay-weather.xml"
+ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
+
+USER_AGENT = "tay-weather-rss-bot/1.1"
+
+# =============================================================================
+# URLs and feed settings
+# =============================================================================
+ALERT_FEED_URL = os.getenv("ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml").strip()
+DISPLAY_AREA_NAME = "Tay Township area"
+
+# Public URLs:
+TAY_ALERTS_URL = (os.getenv("TAY_ALERTS_URL") or "").strip()
+TAY_COORDS_URL = (os.getenv("TAY_COORDS_URL") or "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768").strip()
+
+# =============================================================================
+# Ontario 511 camera resolver settings
+# =============================================================================
+ON511_CAMERAS_API = "https://511on.ca/api/v2/get/cameras"
+ON511_CAMERA_KEYWORD = os.getenv("ON511_CAMERA_KEYWORD", "CR-29").strip() or "CR-29"
+
+# =============================================================================
+# Cooldown policy
+# =============================================================================
+COOLDOWN_MINUTES = {
+    "warning": 60,
+    "watch": 120,
+    "advisory": 180,
+    "statement": 240,
+    "other": 180,
+    "default": 180,
+}
+GLOBAL_COOLDOWN_MINUTES = 5
 
 
 # =============================================================================
@@ -105,31 +179,15 @@ from telegram_gate import is_expired
 def tg_send_test_success(note: str = "") -> None:
     """
     Sends a final confirmation message to Telegram for MANUAL TEST RUNS.
-
-    Why:
-      - You wanted a reliable Telegram confirmation that the workflow:
-          1) ran successfully (green)
-          2) exited cleanly (no crash)
-      - This message is only sent *after* we finish the test run logic.
-
-    When it runs:
-      - Only when TELEGRAM_ENABLE_GATE is true.
-      - Only when we intentionally call it at the end of the TEST MODE path.
-
-    Safety:
-      - Wrapped in try/except so Telegram failures never fail the workflow.
     """
-    # If Telegram is disabled, do nothing
     if not TELEGRAM_ENABLE_GATE:
         return
-
     try:
         msg = "✅ TEST COMPLETE — workflow finished and exited cleanly."
         if note:
             msg += f"\n{note.strip()}"
         tg_send_message(msg)
     except Exception as e:
-        # Never crash the workflow because Telegram couldn't send a message
         print(f"⚠️ Telegram test success message failed: {e}")
 
 
@@ -138,7 +196,6 @@ def warning_delay_elapsed(state: Dict[str, Any], token: str) -> bool:
     WARNING policy:
       - Wait TELEGRAM_PREVIEW_DELAY_MIN minutes after preview was created,
         unless denied.
-    Minimal implementation so the existing call sites work.
     """
     delay_min = int(os.getenv("TELEGRAM_PREVIEW_DELAY_MIN", "15"))
     pending = (state.get("pending_approvals") or {}).get(token) or {}
@@ -159,54 +216,6 @@ def warning_delay_elapsed(state: Dict[str, Any], token: str) -> bool:
     return (int(time.time()) - created_ts) >= (delay_min * 60)
 
 
-# =============================================================================
-# Feature toggles (controlled by GitHub Actions env)
-# =============================================================================
-ENABLE_X_POSTING = os.getenv("ENABLE_X_POSTING", "false").lower() == "true"
-ENABLE_FB_POSTING = os.getenv("ENABLE_FB_POSTING", "false").lower() == "true"
-TELEGRAM_ENABLE_GATE = os.getenv("TELEGRAM_ENABLE_GATE", "true").lower() == "true"
-
-# Legacy compatibility: TEST_TWEET implies X test
-TEST_TWEET = os.getenv("TEST_TWEET", "false").lower() == "true"
-
-# Per-platform test mode (workflow_dispatch inputs set these)
-TEST_X = os.getenv("TEST_X", "false").lower() == "true" or TEST_TWEET
-TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
-
-# =============================================================================
-# RUN MODES (hard safety gate, zero refactor)
-# =============================================================================
-# Goals:
-#   - Add explicit run modes:
-#       live -> normal scheduled behaviour (unchanged)
-#       test_telegram_buttons_no_post -> Telegram preview + buttons only, NEVER post
-#       test_sample_alert_no_post     -> Fake alert + Telegram preview + buttons only, NEVER post
-#
-#   - Hard “no-post” safety gate:
-#       Even if ENABLE_X_POSTING / ENABLE_FB_POSTING are true,
-#       and even if code tries to post, test modes cannot post.
-#
-RUN_MODE = (os.getenv("RUN_MODE", "live") or "live").strip().lower()
-
-_VALID_RUN_MODES = {
-    "live",
-    "test_telegram_buttons_no_post",
-    "test_sample_alert_no_post",
-}
-if RUN_MODE not in _VALID_RUN_MODES:
-    print(f"⚠️ Invalid RUN_MODE='{RUN_MODE}'. Falling back to 'live'.")
-    RUN_MODE = "live"
-
-# Single source of truth for “physically cannot post”
-NO_POST_MODE = RUN_MODE != "live"
-
-# IMPORTANT:
-#   These are the ONLY flags you should use when deciding to post.
-#   They preserve existing behaviour for live runs, but hard-disable in test runs.
-EFFECTIVE_ENABLE_X_POSTING = ENABLE_X_POSTING and (not NO_POST_MODE)
-EFFECTIVE_ENABLE_FB_POSTING = ENABLE_FB_POSTING and (not NO_POST_MODE)
-
-
 def _no_post_guard(platform: str) -> bool:
     """
     Hard safety gate.
@@ -216,77 +225,6 @@ def _no_post_guard(platform: str) -> bool:
         print(f"🧯 NO-POST MODE ACTIVE ({RUN_MODE}) — blocked posting to {platform}.")
         return True
     return False
-
-
-def safe_post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, Any]:
-    """
-    Wrapper to guarantee test modes cannot post to X, even if a code path tries.
-    Live mode behaviour is unchanged.
-    """
-    if _no_post_guard("X"):
-        # Mimic a “dry-run” shape so callers don’t crash.
-        return {"dry_run": True, "blocked_by_run_mode": RUN_MODE}
-    return post_to_x(text, image_refs=image_refs)
-
-
-def safe_post_to_facebook(state: Dict[str, Any], caption: str, image_urls: List[str]) -> Dict[str, Any]:
-    """
-    Wrapper to guarantee test modes cannot post to Facebook, even if a code path tries.
-    Live mode behaviour is unchanged.
-    """
-    if _no_post_guard("Facebook"):
-        return {"dry_run": True, "blocked_by_run_mode": RUN_MODE}
-    return fb.safe_post_facebook(
-        state,
-        caption=caption,
-        image_urls=image_urls,
-        has_new_social_event=True,
-        state_path=STATE_PATH,
-    )
-
-
-# =============================================================================
-# Paths (repo workspace)
-# =============================================================================
-STATE_PATH = "state.json"
-RSS_PATH = "tay-weather.xml"
-ROTATED_X_REFRESH_TOKEN_PATH = "x_refresh_token_rotated.txt"
-
-USER_AGENT = "tay-weather-rss-bot/1.1"
-
-# =============================================================================
-# URLs and feed settings
-# =============================================================================
-ALERT_FEED_URL = os.getenv("ALERT_FEED_URL", "https://weather.gc.ca/rss/battleboard/onrm94_e.xml").strip()
-DISPLAY_AREA_NAME = "Tay Township area"
-
-# Public URLs:
-# - TAY_ALERTS_URL is your preferred "More" page (your GitHub pages /tay/).
-# - TAY_COORDS_URL is the fallback official coords URL.
-TAY_ALERTS_URL = (os.getenv("TAY_ALERTS_URL") or "").strip()
-TAY_COORDS_URL = (os.getenv("TAY_COORDS_URL") or "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768").strip()
-
-# =============================================================================
-# Ontario 511 camera resolver settings
-# =============================================================================
-ON511_CAMERAS_API = "https://511on.ca/api/v2/get/cameras"
-ON511_CAMERA_KEYWORD = os.getenv("ON511_CAMERA_KEYWORD", "CR-29").strip() or "CR-29"
-
-# =============================================================================
-# Cooldown policy
-# =============================================================================
-# NOTE: This is your "anti-spam" policy.
-# - We still dedupe by GUID and by text hash.
-# - This cooldown prevents re-posting too frequently even if EC changes small text.
-COOLDOWN_MINUTES = {
-    "warning": 60,
-    "watch": 120,
-    "advisory": 180,
-    "statement": 240,
-    "other": 180,
-    "default": 180,
-}
-GLOBAL_COOLDOWN_MINUTES = 5
 
 
 # =============================================================================
@@ -314,6 +252,7 @@ def text_hash(s: str) -> str:
 
 # =============================================================================
 # Severity emoji (match Environment Canada alert colours)
+# IMPORTANT: DO NOT CHANGE THIS LOGIC (per your instruction)
 # =============================================================================
 def severity_emoji(title: str) -> str:
     """
@@ -356,10 +295,6 @@ def classify_alert_kind(title: str) -> str:
 # State file (dedupe/cooldowns/telegram gate memory)
 # =============================================================================
 def load_state() -> dict:
-    """
-    This is the only file that makes the bot remember what it has done.
-    If you reset this file, the bot behaves like it's the first run again.
-    """
     default = {
         "seen_ids": [],
         "posted_guids": [],
@@ -373,6 +308,9 @@ def load_state() -> dict:
         "telegram_last_update_id": 0,
         "telegram_last_signal": None,
         "test_gate_token": "",
+
+        # for remix/custom refresh bookkeeping
+        "telegram_last_remix_seen": {},
     }
 
     if not os.path.exists(STATE_PATH):
@@ -394,9 +332,6 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    """
-    Save state and cap growth so it doesn't grow forever.
-    """
     state["seen_ids"] = state.get("seen_ids", [])[-5000:]
     state["posted_guids"] = state.get("posted_guids", [])[-5000:]
     state["posted_text_hashes"] = state.get("posted_text_hashes", [])[-5000:]
@@ -419,9 +354,6 @@ def group_key_for_cooldown(area_name: str, kind: str) -> str:
 
 
 def cooldown_allows_post(state: Dict[str, Any], area_name: str, kind: str) -> Tuple[bool, str]:
-    """
-    Returns (allowed, reason)
-    """
     now_ts = int(time.time())
 
     last_global = safe_int(state.get("global_last_post_ts", 0), 0)
@@ -449,8 +381,6 @@ def mark_posted(state: Dict[str, Any], area_name: str, kind: str) -> None:
 
 # =============================================================================
 # "More:" URL resolver
-#   - Prefer TAY_ALERTS_URL
-#   - Fall back to TAY_COORDS_URL if missing or unreachable
 # =============================================================================
 def _url_looks_ok(url: str) -> bool:
     url = (url or "").strip()
@@ -470,9 +400,6 @@ def _url_looks_ok(url: str) -> bool:
 
 
 def resolve_more_info_url() -> str:
-    """
-    This ensures your posts always use your desired URL when it works.
-    """
     if TAY_ALERTS_URL and _url_looks_ok(TAY_ALERTS_URL):
         return TAY_ALERTS_URL
     return TAY_COORDS_URL
@@ -495,11 +422,6 @@ def fetch_feed_entries(
     retries: int = 3,
     timeout: Tuple[int, int] = (5, 20),
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch EC feed. Supports Atom (<entry>) and RSS 2.0 (<item>).
-    Returns entries newest-first with a common shape:
-      {id,title,link,summary,updated_dt}
-    """
     last_err: Optional[Exception] = None
 
     def _parse_rss_dt(s: str) -> dt.datetime:
@@ -558,10 +480,7 @@ def fetch_feed_entries(
                         link = (it.findtext("link", default="") or "").strip()
                         guid = (it.findtext("guid", default="") or "").strip()
                         pub = (it.findtext("pubDate", default="") or "").strip()
-
-                        # Description can be HTML; keep raw text here
                         desc = (it.findtext("description", default="") or "").strip()
-
                         entries.append(
                             {
                                 "id": guid or link or title,
@@ -574,8 +493,7 @@ def fetch_feed_entries(
 
             entries = [e for e in entries if (e.get("id") or "").strip()]
             entries.sort(
-                key=lambda x: x.get("updated_dt")
-                or dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc),
+                key=lambda x: x.get("updated_dt") or dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc),
                 reverse=True,
             )
             return entries
@@ -591,9 +509,6 @@ def fetch_feed_entries(
 
 
 def atom_title_for_tay(title: str) -> str:
-    """
-    Convert EC region naming to your local naming.
-    """
     if not title:
         return title
     t = title.replace(", Midland - Coldwater - Orr Lake", f" ({DISPLAY_AREA_NAME})")
@@ -601,8 +516,11 @@ def atom_title_for_tay(title: str) -> str:
     return t
 
 
-def atom_entry_guid(entry: Dict[str, Any]) -> str:
-    return (entry.get("id") or entry.get("link") or entry.get("title") or "").strip()
+def normalize_alert_title(title: str) -> str:
+    t = (title or "").strip()
+    t = t.replace("–", "-").replace("—", "-")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
 
 # =============================================================================
@@ -661,21 +579,16 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             sl = s.lower()
             if "environment canada" in sl or "continue to monitor" in sl:
                 continue
-
             candidate = _clean_details(s)
             if candidate:
                 return [candidate.rstrip(".") + "."]
-
     return []
+
 
 # =============================================================================
 # Google Sheet + Google Drive integration
 # =============================================================================
 def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
-    """
-    Returns (sheets_service, drive_service, sheet_id, drive_folder_id).
-    If missing creds, returns (None, None, "", "").
-    """
     sheet_id = (os.getenv("GOOGLE_SHEET_ID") or "").strip()
     sa_json = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
     drive_folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
@@ -765,10 +678,6 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
 
 
 def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str) -> List[str]:
-    """
-    Return ALL enabled care texts that match, in the same priority order
-    as pick_care_statement(). This enables Remix to choose a different one.
-    """
     def enabled(r: dict) -> bool:
         return str(r.get("enabled", "")).strip().lower() in ("true", "yes", "1", "y")
 
@@ -805,7 +714,6 @@ def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str
 
     out: List[str] = []
     seen = set()
-
     for bc, bt in buckets:
         for r in (care_rows or []):
             if not enabled(r):
@@ -816,7 +724,6 @@ def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str
             if txt and txt not in seen:
                 out.append(txt)
                 seen.add(txt)
-
     return out
 
 
@@ -827,9 +734,6 @@ def pick_remixed_care_text(
     current_care_text: str,
     remix_count: int,
 ) -> str:
-    """
-    Remix picks a different care statement (when possible), cycling by remix_count.
-    """
     candidates = list_matching_care_texts(care_rows, colour, alert_type)
     cur = (current_care_text or "").strip()
 
@@ -845,36 +749,9 @@ def pick_remixed_care_text(
     return candidates[idx].strip()
 
 
-def load_media_rules_rows() -> List[dict]:
-    sheets_svc, _, sheet_id, _ = _google_services()
-    if not sheets_svc or not sheet_id:
-        return []
-
-    try:
-        rng = "MediaRules!A:Z"
-        resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
-        values = resp.get("values", [])
-        if not values or len(values) < 2:
-            return []
-        headers = [h.strip().lower() for h in values[0]]
-        rows: List[dict] = []
-        for v in values[1:]:
-            row = {}
-            for i, h in enumerate(headers):
-                row[h] = v[i].strip() if i < len(v) and isinstance(v[i], str) else (v[i] if i < len(v) else "")
-            rows.append(row)
-        return rows
-    except Exception:
-        return []
-
-
 # =============================================================================
 # Google Drive curated photos (FIRST choice for images)
 # =============================================================================
-def _drive_direct_download_url(file_id: str) -> str:
-    return f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-
-
 def pick_drive_images(
     drive_svc: Any,
     folder_id: str,
@@ -951,7 +828,6 @@ def download_drive_image_bytes(drive_svc: Any, drive_ref: str) -> Tuple[bytes, s
 
     meta = drive_svc.files().get(fileId=file_id, fields="mimeType,name").execute()
     mime = (meta.get("mimeType") or "application/octet-stream").lower()
-
     data = drive_svc.files().get_media(fileId=file_id).execute()
     if not isinstance(data, (bytes, bytearray)):
         data = bytes(data)
@@ -1018,7 +894,6 @@ def resolve_on511_views_by_keyword(keyword: str) -> List[Dict[str, Any]]:
                 for v in views:
                     if isinstance(v, dict):
                         out.append(v)
-
     return out
 
 
@@ -1094,7 +969,6 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
 
     try:
         im = Image.open(BytesIO(image_bytes)).convert("RGBA")
-
         asset_path = Path(__file__).resolve().parent / "assets" / "On511_logo.png"
         logo = Image.open(asset_path).convert("RGBA")
 
@@ -1112,7 +986,6 @@ def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
         pad = max(8, int(im.width * BUG_PAD_RELATIVE))
         x = max(0, im.width - logo.width - pad)
         y = max(0, im.height - logo.height - pad)
-
         im.alpha_composite(logo, (x, y))
 
         out = BytesIO()
@@ -1129,12 +1002,7 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
     if not image_url:
         raise RuntimeError("No image_url provided")
 
-    r = requests.get(
-        image_url,
-        headers={"User-Agent": USER_AGENT},
-        timeout=(10, 30),
-        allow_redirects=True,
-    )
+    r = requests.get(image_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30), allow_redirects=True)
     r.raise_for_status()
 
     content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -1142,7 +1010,6 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
         raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
 
     data = r.content
-
     u = image_url.lower()
     if "511on.ca" in u and "/cctv/" in u:
         data, content_type = apply_on511_bug(data, content_type)
@@ -1280,7 +1147,6 @@ def x_upload_media(image_ref: str) -> str:
 
     auth = OAuth1(api_key, api_secret, access_token, access_secret)
     upload_url = "https://upload.twitter.com/1.1/media/upload.json"
-
     files = {"media": ("image", img_bytes, mime_type)}
     r = requests.post(upload_url, auth=auth, files=files, timeout=60)
 
@@ -1340,6 +1206,24 @@ def post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, An
         raise RuntimeError(f"X post failed {r.status_code}")
 
     return r.json()
+
+
+def safe_post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, Any]:
+    if _no_post_guard("X"):
+        return {"dry_run": True, "blocked_by_run_mode": RUN_MODE}
+    return post_to_x(text, image_refs=image_refs)
+
+
+def safe_post_to_facebook(state: Dict[str, Any], caption: str, image_urls: List[str]) -> Dict[str, Any]:
+    if _no_post_guard("Facebook"):
+        return {"dry_run": True, "blocked_by_run_mode": RUN_MODE}
+    return fb.safe_post_facebook(
+        state,
+        caption=caption,
+        image_urls=image_urls,
+        has_new_social_event=True,
+        state_path=STATE_PATH,
+    )
 
 
 # =============================================================================
@@ -1432,23 +1316,20 @@ def _pretty_title_for_social(title: str) -> str:
     """
     t = (title or "").strip()
 
-    # Match: "<Colour> <Type> - <Hazard>"
     m = re.match(r"^(yellow|orange|red)\s+(warning|watch|advisory)\s*-\s*(.+)$", t, flags=re.IGNORECASE)
     if m:
-        alert_type = m.group(2).lower().strip()      # warning/watch/advisory
-        hazard = m.group(3).strip()                  # Snowfall
+        alert_type = m.group(2).lower().strip()
+        hazard = m.group(3).strip()
         hazard = hazard[:1].upper() + hazard[1:] if hazard else hazard
         return f"{hazard} {alert_type} in Tay Township"
 
-    # Fallback: remove trailing parentheses only
     t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
     return f"{t} in Tay Township"
 
 
 def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
-    # Use custom text from Telegram if available, otherwise use spreadsheet care
     care_to_add = (custom_x if custom_x else care).strip()
-    
+
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
     sev = severity_emoji(title_raw)
@@ -1460,9 +1341,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
-    # ---------------------------------------------------------
-    # STEP 1: Attempt Maximum Details (2 lines)
-    # ---------------------------------------------------------
     parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_max = "\n".join([p for p in parts_max if p])
 
@@ -1470,12 +1348,9 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
         if care_to_add:
             candidate = text_max + "\n\n" + care_to_add
             if len(candidate) <= 280:
-                return candidate  # Fits with 2 details + Care
-        return text_max  # Fits with 2 details (Care too long or empty)
+                return candidate
+        return text_max
 
-    # ---------------------------------------------------------
-    # STEP 2: Fallback to 1 Detail Line
-    # ---------------------------------------------------------
     if details_lines:
         parts_med = [title_line, "", details_lines[0], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
         text_med = "\n".join([p for p in parts_med if p])
@@ -1483,12 +1358,9 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
             if care_to_add:
                 candidate = text_med + "\n\n" + care_to_add
                 if len(candidate) <= 280:
-                    return candidate  # Fits with 1 detail + Care
-            return text_med  # Fits with 1 detail
+                    return candidate
+            return text_med
 
-    # ---------------------------------------------------------
-    # STEP 3: Fallback to No Details (Title/Links only)
-    # ---------------------------------------------------------
     parts_min = [title_line, "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_min = "\n".join([p for p in parts_min if p])
     if len(text_min) <= 280:
@@ -1498,7 +1370,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
                 return candidate
         return text_min
 
-    # Final hard safety truncate if even the title/links are too long
     return text_min[:277].rstrip() + "..."
 
 
@@ -1531,9 +1402,10 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
 
     return "\n".join([p for p in parts if p])
 
-    # =============================================================================
-    # Image selection policy
-    # =============================================================================
+
+# =============================================================================
+# Image selection policy
+# =============================================================================
 def choose_images_for_alert(
     drive_svc: Optional[Any],
     drive_folder_id: str,
@@ -1558,6 +1430,7 @@ def choose_images_for_alert(
     if drive_refs:
         return drive_refs[:2]
 
+    # Policy: If WIND WARNING, do not use highway camera images
     if alert_kind == "warning" and "wind" in (alert_type_label or "").lower():
         return []
 
@@ -1567,15 +1440,31 @@ def choose_images_for_alert(
         print(f"⚠️ Camera fallback failed: {e}")
         return []
 
-def normalize_alert_title(title: str) -> str:
+
+# =============================================================================
+# Telegram decision helper (robust)
+# =============================================================================
+def wait_for_decision_safe(state: Dict[str, Any], token: str) -> str:
     """
-    Minimal normalizer for consistent comparisons and formatting.
-    Keeps your severity emoji behaviour unchanged (does NOT add/remove colours).
+    For non-warning alerts, we wait up to TELEGRAM_WAIT_SECONDS for APPROVE/DENY.
+    If no approval is received, we treat it as DENIED (safe default).
     """
-    t = (title or "").strip()
-    t = t.replace("–", "-").replace("—", "-")
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
+    try:
+        d = wait_for_decision(
+            state,
+            save_state,
+            token,
+            max_wait_seconds=wait_seconds,
+            poll_interval_seconds=4,
+        )
+    except Exception as e:
+        print(f"⚠️ wait_for_decision failed ({e}); treating as denied.")
+        d = "denied"
+
+    # Anything other than explicit approved is treated as denied for safety
+    return d if d in ("approved", "denied") else "denied"
+
 
 # =============================================================================
 # Main routine
@@ -1583,6 +1472,7 @@ def normalize_alert_title(title: str) -> str:
 def main() -> None:
     more_url = resolve_more_info_url()
 
+    # cleanup rotated token file
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
         try:
             os.remove(ROTATED_X_REFRESH_TOKEN_PATH)
@@ -1594,53 +1484,21 @@ def main() -> None:
     global _DRIVE_SVC_FOR_MEDIA
     _DRIVE_SVC_FOR_MEDIA = drive_svc
 
-    care_rows = []
-    try:
-        care_rows = load_care_statements_rows()
-    except Exception as e:
-        print(f"⚠️ CareStatements load failed: {e}")
-        care_rows = []
-
-    media_rules = []
-    try:
-        media_rules = load_media_rules_rows()
-        if media_rules:
-            print(f"MediaRules loaded: {len(media_rules)} rows")
-        else:
-            print("MediaRules: none (empty or missing). Using default Drive-first behaviour.")
-    except Exception as e:
-        print(f"⚠️ MediaRules load failed (ignored): {e}")
-
     # -------------------------------------------------------------------------
     # RUN MODE: TEST (Telegram-first, NO POST)
     # -------------------------------------------------------------------------
-    # IMPORTANT:
-    #   These modes exist ONLY to test Telegram as a first-class surface:
-    #     - Always send a preview
-    #     - Always show inline buttons (Approve / Deny / Remix / Custom)
-    #     - Allow interaction testing with zero risk of public posts
-    #   And they must exit cleanly with a final Telegram confirmation.
-    #
     if RUN_MODE in ("test_telegram_buttons_no_post", "test_sample_alert_no_post"):
         if not TELEGRAM_ENABLE_GATE:
             print("RUN_MODE is a Telegram test mode, but TELEGRAM_ENABLE_GATE=false. Exiting cleanly.")
             return
 
-        # Baseline images for preview (safe and deterministic)
         test_images = resolve_cr29_image_urls()
-
-        # Create a stable-ish token so repeated runs aren’t spammy,
-        # but rotate it if expired/decided.
         st = load_state()
 
-        # Always ingest any button presses / messages since last run
         ingest_telegram_actions(st, save_state)
-
-        # Optional: reminders near expiry (safe to call every run)
         maybe_send_reminders(st, save_state)
 
         token = (st.get("test_gate_token") or "").strip()
-
         created_at = None
         if token:
             created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
@@ -1654,9 +1512,6 @@ def main() -> None:
             st["test_gate_token"] = token
             save_state(st)
 
-        # Build preview content:
-        #  - "buttons only" mode can be very short
-        #  - "sample alert" mode uses your *real* formatters (no emoji logic changes)
         if RUN_MODE == "test_telegram_buttons_no_post":
             preview_text = (
                 "🧪 TEST MODE: Telegram buttons (NO POST)\n\n"
@@ -1665,23 +1520,16 @@ def main() -> None:
                 f"TOKEN: {token}"
             )
             kind_for_buttons = "other"
-
         else:
-            # Fake entry: deliberately shaped like an Atom entry.
-            # Uses your existing formatting (severity emoji logic preserved).
             fake_entry = {
                 "id": f"test-sample-{token}",
                 "title": "Yellow Advisory - Snowfall",
-                "link": TAY_COORDS_URL,  # safe, stable
+                "link": TAY_COORDS_URL,
                 "summary": "Test sample alert (no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
-
-            # Keep care empty here (sample is focused on Telegram + format pipeline),
-            # but we still allow Custom to append.
             x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
             fb_text = build_facebook_post_text(fake_entry, care="", more_url=more_url)
-
             preview_text = (
                 f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
                 f"----- X (NO POST) -----\n{x_text}\n\n"
@@ -1692,7 +1540,6 @@ def main() -> None:
             )
             kind_for_buttons = classify_alert_kind(fake_entry["title"])
 
-        # Always send preview + inline buttons (Approve / Deny / Remix / Custom)
         ensure_preview_sent(
             st,
             save_state,
@@ -1702,20 +1549,10 @@ def main() -> None:
             image_urls=test_images,
         )
 
-        # Wait for decision (optional). This is interaction testing.
         d = decision_for(st, token)
         if d not in ("approved", "denied"):
-            wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
-            d = wait_for_decision(
-                st,
-                save_state,
-                token,
-                max_wait_seconds=wait_seconds,
-                poll_interval_seconds=4,
-            )
+            d = wait_for_decision_safe(st, token)
 
-        # NOTE:
-        #   In NO-POST test modes, “approved” does not post; it only validates the flow.
         if d == "approved":
             try:
                 tg_send_message("✅ Test approved — confirmed: NO POST mode blocked all platform posting.")
@@ -1732,34 +1569,22 @@ def main() -> None:
             except Exception:
                 pass
 
-        # Final confirmation + clean exit (no fall-through)
         tg_send_test_success("Telegram preview + buttons path completed (NO POST mode).")
         return
 
     # -------------------------------------------------------------------------
     # LIVE MODE: Optional platform test (existing behaviour preserved)
     # -------------------------------------------------------------------------
-    # IMPORTANT:
-    #   This branch is your existing manual “platform test” behaviour.
-    #   It remains live-only. It is NOT used by the NO-POST test modes above.
-    #
     if (TEST_X or TEST_FACEBOOK) and (not NO_POST_MODE):
         base = "Testing the validity of the post — please ignore ✅"
-
-        # Use the same images you'd typically have available (CR-29 cams as an easy baseline).
         test_images = resolve_cr29_image_urls()
 
-        # ---------------------------------------------------------------------
-        # TELEGRAM GATE (for test)
-        # ---------------------------------------------------------------------
         if TELEGRAM_ENABLE_GATE:
             st = load_state()
-
             ingest_telegram_actions(st, save_state)
             maybe_send_reminders(st, save_state)
 
             token = (st.get("test_gate_token") or "").strip()
-
             created_at = None
             if token:
                 created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
@@ -1787,25 +1612,11 @@ def main() -> None:
                 f"TOKEN: {token}"
             )
 
-            ensure_preview_sent(
-                st,
-                save_state,
-                token,
-                preview_text,
-                kind="other",
-                image_urls=test_images,
-            )
+            ensure_preview_sent(st, save_state, token, preview_text, kind="other", image_urls=test_images)
 
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
-                wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
-                d = wait_for_decision(
-                    st,
-                    save_state,
-                    token,
-                    max_wait_seconds=wait_seconds,
-                    poll_interval_seconds=4,
-                )
+                d = wait_for_decision_safe(st, token)
 
             if d == "denied":
                 print("Telegram: denied (test). Not posting.")
@@ -1823,9 +1634,6 @@ def main() -> None:
                     pass
                 return
 
-        # ---------------------------------------------------------------------
-        # OPTIONAL: ACTUALLY POST TEST CONTENT (only if toggles are on)
-        # ---------------------------------------------------------------------
         if EFFECTIVE_ENABLE_X_POSTING and TEST_X:
             safe_post_to_x(f"{base}\n\n(X)", image_refs=test_images)
 
@@ -1836,34 +1644,27 @@ def main() -> None:
 
             fb_local = materialize_images_for_facebook(test_images)
             try:
-                fb_result = safe_post_to_facebook(
-                    st2,
-                    caption=f"{base}\n\n(Facebook)",
-                    image_urls=fb_local,
-                )
+                fb_result = safe_post_to_facebook(st2, caption=f"{base}\n\n(Facebook)", image_urls=fb_local)
                 print("FB result:", fb_result)
             finally:
                 cleanup_tmp_media_files(fb_local)
 
-        tg_send_test_success(
-            "Remix + Custom buttons are ready — try them on the preview above."
-        )
+        tg_send_test_success("Remix + Custom buttons are ready — try them on the preview above.")
         return
 
     # -------------------------------------------------------------------------
     # NORMAL MODE (real alerts)
     # -------------------------------------------------------------------------
     state = load_state()
-    state.setdefault("telegram_last_remix_seen", {})
-    state.setdefault("telegram_custom_text", {})
 
-    # ----------------------------
-    # Load CareStatements once per run (Google Sheet)
-    # ----------------------------
+    # Load CareStatements once per run
     care_rows: List[dict] = []
     try:
         care_rows = load_care_statements_rows()
         print(f"CareStatements: loaded {len(care_rows)} rows")
+        # ✅ DEBUG: show header keys so you can confirm the sheet columns match
+        if care_rows:
+            print("CareStatements: sample keys:", sorted(care_rows[0].keys()))
     except Exception as e:
         print(f"⚠️ CareStatements failed to load (will post without care text): {e}")
         care_rows = []
@@ -1880,25 +1681,18 @@ def main() -> None:
         print("Exiting cleanly; will retry on next scheduled run.")
         return
 
-    # ✅ PUT THIS RIGHT HERE (outside the loop)
     def entry_guid(entry: dict) -> str:
         return (entry.get("id") or entry.get("link") or "").strip()
 
-    # Process newest-first
     for entry in feed_entries:
         guid = entry_guid(entry)
         if not guid:
             continue
 
-        title = normalize_alert_title(
-            atom_title_for_tay((entry.get("title") or "Weather alert").strip())
-        )
+        title = normalize_alert_title(atom_title_for_tay((entry.get("title") or "Weather alert").strip()))
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
-        # ---------------------------------------------------------
-        # Skip "ended/cancelled/no alert" entries (ALWAYS do this)
-        # ---------------------------------------------------------
         inactive_markers = (
             "ended",
             "has ended",
@@ -1915,9 +1709,6 @@ def main() -> None:
             posted.add(guid)
             continue
 
-        # ---------------------------------------------------------
-        # RSS write (ALWAYS do this, independent of care statements)
-        # ---------------------------------------------------------
         pub_dt = entry.get("updated_dt") or dt.datetime.now(dt.timezone.utc)
         pub_date = email.utils.format_datetime(pub_dt)
         link = more_url
@@ -1933,15 +1724,9 @@ def main() -> None:
                 description=description,
             )
 
-        # ---------------------------------------------------------
-        # Already posted this alert GUID? skip social
-        # ---------------------------------------------------------
         if guid in posted:
             continue
 
-        # ---------------------------------------------------------
-        # Determine kind + cooldown bucket
-        # ---------------------------------------------------------
         alert_kind = classify_alert_kind(title)
 
         allowed, reason = cooldown_allows_post(state, DISPLAY_AREA_NAME, kind=alert_kind)
@@ -1949,22 +1734,14 @@ def main() -> None:
             print("Social skipped:", reason)
             continue
 
-        # ---------------------------------------------------------
-        # Build alert type label + severity
-        # ---------------------------------------------------------
         title_raw = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
 
-        # type_label is TYPE (warning/watch/advisory/statement), not colour
-        type_label = re.sub(r"\s*\(.*?\)\s*$", "", title_raw).strip().lower()
-        
-        # sev is COLOUR (🟡🟠🔴) derived from EC banner prefix; do not change severity_emoji()
+        # ✅ FIX: type_label must be a real type bucket, not the full title
+        type_label = classify_alert_kind(title_raw)
+
+        # ✅ severity emoji remains EXACTLY as your existing logic
         sev = severity_emoji(title_raw)
 
-
-
-        # ---------------------------------------------------------
-        # CARE STATEMENT (Facebook only)
-        # ---------------------------------------------------------
         care = ""
         if care_rows:
             try:
@@ -1973,13 +1750,12 @@ def main() -> None:
                     print(f"CareStatements: matched ({sev} / {type_label})")
                 else:
                     print(f"CareStatements: no match for ({sev} / {type_label})")
+                # ✅ DEBUG: show what was chosen
+                print("CareStatements: chosen text:", (care[:120] + "…") if care and len(care) > 120 else care)
             except Exception as e:
                 print(f"⚠️ Care statement match failed: {e}")
                 care = ""
 
-        # ---------------------------------------------------------
-        # Choose images (Drive first, then cameras)
-        # ---------------------------------------------------------
         image_refs = choose_images_for_alert(
             drive_svc=drive_svc,
             drive_folder_id=drive_folder_id,
@@ -1988,15 +1764,9 @@ def main() -> None:
             severity=sev,
         )
 
-        # ---------------------------------------------------------
-        # Build platform-specific text
-        # ---------------------------------------------------------
         x_text = build_x_post_text(entry, more_url=more_url, care=care)
         fb_text = build_facebook_post_text(entry, care=care, more_url=more_url)
 
-        # ---------------------------------------------------------
-        # Dedupe by X text hash
-        # ---------------------------------------------------------
         h = text_hash(x_text)
         if h in posted_text_hashes:
             print("Social skipped: duplicate text hash already posted")
@@ -2020,76 +1790,53 @@ def main() -> None:
                 f"More:\n{more_url}"
             )
 
-            ensure_preview_sent(
-                state,
-                save_state,
-                token,
-                preview_text,
-                kind=alert_kind,
-                image_urls=image_refs,
-            )
-            
-            # ---------------------------------------------------------------------
-            # TELEGRAM DECISION GATE (HARD RULE)
-            # Only APPROVED may proceed. Denied or expired must STOP the run.
-            # ---------------------------------------------------------------------
-            st = load_state()
-            ingest_telegram_actions(st, save_state)
-            maybe_send_reminders(st, save_state)
-            
-            # ensure_preview_sent(st, save_state, token, preview_text, kind, image_urls=...)
-            # (your existing preview send stays as-is)
-            
-            # 1) If user already decided:
-            d = decision_for(st, token)
-            if d == "denied":
-                print(f"🛑 Telegram decision is DENIED for token {token}. Will NOT post.")
-                return
-            if d == "approved":
-                print(f"✅ Telegram decision is APPROVED for token {token}. Proceeding.")
+            ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind, image_urls=image_refs)
+
+            # ✅ Decision rules:
+            #   - WARNING: if denied => do not post; if approved => post; else auto-post after delay.
+            #   - OTHER: must be approved (wait up to TELEGRAM_WAIT_SECONDS); timeout => denied.
+            d = decision_for(state, token)
+
+            if alert_kind == "warning":
+                if d == "denied":
+                    print(f"🛑 Telegram denied for WARNING token={token}. Skipping.")
+                    continue
+                if d != "approved":
+                    # not approved yet — only proceed if delay elapsed and STILL not denied
+                    if not warning_delay_elapsed(state, token):
+                        print(f"⏳ WARNING waiting for delay window (token={token}). Not posting this run.")
+                        continue
+                    # refresh decisions after delay window
+                    ingest_telegram_actions(state, save_state)
+                    d2 = decision_for(state, token)
+                    if d2 == "denied":
+                        print(f"🛑 Telegram denied during delay window (token={token}). Skipping.")
+                        continue
+                    # if still pending, allow auto-post after delay
+                    print(f"✅ WARNING delay elapsed and not denied (token={token}). Proceeding to post.")
+                else:
+                    print(f"✅ Telegram approved for WARNING token={token}. Proceeding to post.")
+
             else:
-                # 2) Still pending — check TTL and STOP either way (pending or expired)
-                pending = (st.get("pending_approvals") or {}).get(token) or {}
-                created_at = (pending.get("created_at") or "").strip()
-            
-                # If we can't parse created_at safely, treat as pending and STOP.
-                if not created_at:
-                    print(f"⏳ Telegram decision pending (no created_at). Will NOT post.")
-                    return
-            
-                # created_at is like "2026-01-07T02:31:04Z"
-                created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                age_min = (dt.datetime.now(dt.timezone.utc) - created_dt).total_seconds() / 60.0
-            
-                if age_min >= TELEGRAM_APPROVAL_TTL_MIN:
-                    # EXPIRED => mark denied and STOP
-                    mark_denied(st, token, reason="expired")
-                    save_state(st)
-                    print(f"⌛ Telegram approval EXPIRED for token {token}. Marked denied. Will NOT post.")
-                    return
-            
-                # Still within TTL but not approved yet => STOP this run
-                print(f"⏳ Telegram decision still pending ({age_min:.1f} min old). Will NOT post on this run.")
-                return
+                # watch/advisory/statement/other must be explicitly approved
+                if d not in ("approved", "denied"):
+                    d = wait_for_decision_safe(state, token)
+
+                if d != "approved":
+                    print(f"🛑 Telegram not approved for token={token} (d={d}). Skipping.")
+                    continue
 
             # --- Handle Remix / Custom requests (rebuild preview when requested) ---
-            custom = custom_text_for(state, token) or {}  # {"x": ..., "fb": ...}
-            
-            needs_refresh = False
-            state.setdefault("telegram_last_remix_seen", {})
-            last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
+            custom = custom_text_for(state, token) or {}
             current_remix = remix_count_for(state, token)
-            
+            last_seen = int((state.get("telegram_last_remix_seen") or {}).get(token, 0))
+
             x_extra = (custom.get("x") or "").strip()
             fb_extra = (custom.get("fb") or "").strip()
-            
-            if current_remix != last_seen:
-                needs_refresh = True
-            if x_extra or fb_extra:
-                needs_refresh = True
-            
+
+            needs_refresh = (current_remix != last_seen) or bool(x_extra) or bool(fb_extra)
+
             if needs_refresh:
-                # --- CARE: remix chooses another valid care when possible ---
                 care2 = care
                 if care_rows and (current_remix != last_seen):
                     try:
@@ -2103,12 +1850,10 @@ def main() -> None:
                     except Exception as e:
                         print(f"⚠️ Care remix failed: {e}")
                         care2 = care
-            
-                # Rebuild texts using care2
+
                 x_text2 = build_x_post_text(entry, more_url=more_url, care=care2)
                 fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url)
-            
-                # Apply custom extras (append-if-fits for X; always append for FB)
+
                 x_note = ""
                 if x_extra:
                     candidate = x_text2 + "\n\n" + x_extra
@@ -2117,15 +1862,14 @@ def main() -> None:
                     else:
                         over = len(candidate) - 280
                         x_note = f"⚠️ X custom text too long by {over} chars (not applied)."
-            
+
                 if fb_extra:
                     fb_text2 = fb_text2 + "\n\n" + fb_extra
-            
-                # ✅ IMPORTANT: what we preview is what we will post
+
                 care = care2
                 x_text = x_text2
                 fb_text = fb_text2
-            
+
                 refreshed_preview = (
                     f"🚨 {title}\n\n"
                     f"----- X (will post) -----\n{x_text}\n\n"
@@ -2135,38 +1879,17 @@ def main() -> None:
                 )
                 if x_note:
                     refreshed_preview = x_note + "\n\n" + refreshed_preview
-            
-                tg_send_message(refreshed_preview)
-            
-                state["telegram_last_remix_seen"][token] = current_remix
+
+                try:
+                    tg_send_message(refreshed_preview)
+                except Exception:
+                    pass
+
+                state.setdefault("telegram_last_remix_seen", {})
+                state["telegram_last_remix_seen"][token] = int(current_remix)
                 save_state(state)
 
-            
-            d = decision_for(state, token)
-
-            if alert_kind in ("watch", "advisory", "statement", "other"):
-                if d == "denied":
-                    continue
-                if d != "approved":
-                    if is_expired(state, token):
-                        continue
-                    d = wait_for_decision(
-                        state,
-                        save_state,
-                        token,
-                        max_wait_seconds=int(os.getenv("TELEGRAM_WAIT_SECONDS", "600")),
-                        poll_interval_seconds=4,
-                    )
-                    if d != "approved":
-                        continue
-
-            elif alert_kind == "warning":
-                if d == "denied":
-                    continue
-                if not warning_delay_elapsed(state, token):
-                    continue
-
-        # Recompute hash after any Telegram refresh (remix/custom can change x_text)
+        # Recompute hash after any Telegram refresh
         h = text_hash(x_text)
         if h in posted_text_hashes:
             print("Social skipped: duplicate text hash already posted (after refresh)")
@@ -2185,11 +1908,7 @@ def main() -> None:
         if EFFECTIVE_ENABLE_FB_POSTING:
             fb_images = materialize_images_for_facebook(image_refs)
             try:
-                safe_post_to_facebook(
-                    state,
-                    caption=fb_text,
-                    image_urls=fb_images,
-                )
+                safe_post_to_facebook(state, caption=fb_text, image_urls=fb_images)
                 posted_this = True
             finally:
                 cleanup_tmp_media_files(fb_images)
@@ -2217,6 +1936,7 @@ def main() -> None:
     state["posted_guids"] = list(posted)
     state["posted_text_hashes"] = list(posted_text_hashes)
     save_state(state)
+
 
 if __name__ == "__main__":
     main()
