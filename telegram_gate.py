@@ -283,3 +283,40 @@ def ensure_preview_sent(state: Dict[str, Any], save_fn: Callable[[Dict[str, Any]
         "buttons_chat_id": TELEGRAM_CHAT_ID,
     }
     save_fn(state)
+# ----------------------------
+# Decision helpers (imported by tay_weather_bot.py)
+# ----------------------------
+def decision_for(state: Dict[str, Any], token: str) -> Optional[str]:
+    """
+    Search key: DECISION_FOR
+    Returns: "approved" | "denied" | None
+    """
+    _ensure_state_defaults(state)
+    rec = (state.get("approval_decisions") or {}).get(token) or {}
+    d = (rec.get("decision") or "").strip().lower()
+    if d in ("approved", "denied"):
+        return d
+    return None
+
+
+def is_pending(state: Dict[str, Any], token: str) -> bool:
+    """
+    Search key: IS_PENDING
+    True if token still awaiting a decision.
+    """
+    _ensure_state_defaults(state)
+    return token in (state.get("pending_approvals") or {})
+
+
+def mark_denied(state: Dict[str, Any], token: str, reason: str = "expired") -> None:
+    """
+    Search key: MARK_DENIED
+    Sets a token to denied (used for TTL expiry).
+    """
+    _ensure_state_defaults(state)
+    state["approval_decisions"][token] = {
+        "decision": "denied",
+        "decided_at": _utc_now_z(),
+        "reason": reason,
+    }
+    state["pending_approvals"].pop(token, None)
