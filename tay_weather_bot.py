@@ -2026,12 +2026,8 @@ def main() -> None:
             )
 
             # --- Handle Remix / Custom requests (rebuild preview when requested) ---
-            state.setdefault("telegram_last_remix_seen", {})
-            last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
-            current_remix = remix_count_for(state, token)
-
             custom = custom_text_for(state, token) or {}  # {"x": ..., "fb": ...}
-
+            
             needs_refresh = False
             state.setdefault("telegram_last_remix_seen", {})
             last_seen = int(state["telegram_last_remix_seen"].get(token, 0))
