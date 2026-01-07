@@ -83,15 +83,17 @@ from requests_oauthlib import OAuth1
 
 import facebook_poster as fb
 from telegram_gate import (
-    ensure_preview_sent,
     ingest_telegram_actions,
     maybe_send_reminders,
+    ensure_preview_sent,
+    update_preview,
     decision_for,
     is_pending,
     mark_denied,
-    is_expired,
     remix_count_for,
     custom_text_for,
+    clear_custom_text,
+    wait_for_decision,
 )
 from telegram_gate import tg_send_message
 from telegram_gate import is_expired
