@@ -89,6 +89,9 @@ from telegram_gate import (
     decision_for,
     is_pending,
     mark_denied,
+    is_expired,
+    remix_count_for,
+    custom_text_for,
 )
 from telegram_gate import tg_send_message
 from telegram_gate import is_expired
