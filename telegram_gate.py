@@ -242,6 +242,16 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
 # ----------------------------
 # Sending Previews
 # ----------------------------
+def maybe_send_reminders(state: dict, save_state_fn) -> None:
+    """
+    Optional: send reminder messages as approvals near expiry.
+
+    This is intentionally a no-op placeholder so tay_weather_bot.py can import it
+    even if reminders aren’t implemented yet.
+    """
+    return
+
+
 def ensure_preview_sent(state: Dict[str, Any], save_fn: Callable[[Dict[str, Any]], None], 
                         token: str, preview_text: str, kind: str, image_urls: Optional[List[str]] = None) -> None:
     """
