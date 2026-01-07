@@ -83,13 +83,12 @@ from requests_oauthlib import OAuth1
 
 import facebook_poster as fb
 from telegram_gate import (
+    ensure_preview_sent,
     ingest_telegram_actions,
     maybe_send_reminders,
-    ensure_preview_sent,
     decision_for,
-    wait_for_decision,
-    remix_count_for,
-    custom_text_for,
+    is_pending,
+    mark_denied,
 )
 from telegram_gate import tg_send_message
 from telegram_gate import is_expired
@@ -2024,6 +2023,49 @@ def main() -> None:
                 kind=alert_kind,
                 image_urls=image_refs,
             )
+            
+            # ---------------------------------------------------------------------
+            # TELEGRAM DECISION GATE (HARD RULE)
+            # Only APPROVED may proceed. Denied or expired must STOP the run.
+            # ---------------------------------------------------------------------
+            st = load_state()
+            ingest_telegram_actions(st, save_state)
+            maybe_send_reminders(st, save_state)
+            
+            # ensure_preview_sent(st, save_state, token, preview_text, kind, image_urls=...)
+            # (your existing preview send stays as-is)
+            
+            # 1) If user already decided:
+            d = decision_for(st, token)
+            if d == "denied":
+                print(f"🛑 Telegram decision is DENIED for token {token}. Will NOT post.")
+                return
+            if d == "approved":
+                print(f"✅ Telegram decision is APPROVED for token {token}. Proceeding.")
+            else:
+                # 2) Still pending — check TTL and STOP either way (pending or expired)
+                pending = (st.get("pending_approvals") or {}).get(token) or {}
+                created_at = (pending.get("created_at") or "").strip()
+            
+                # If we can't parse created_at safely, treat as pending and STOP.
+                if not created_at:
+                    print(f"⏳ Telegram decision pending (no created_at). Will NOT post.")
+                    return
+            
+                # created_at is like "2026-01-07T02:31:04Z"
+                created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                age_min = (dt.datetime.now(dt.timezone.utc) - created_dt).total_seconds() / 60.0
+            
+                if age_min >= TELEGRAM_APPROVAL_TTL_MIN:
+                    # EXPIRED => mark denied and STOP
+                    mark_denied(st, token, reason="expired")
+                    save_state(st)
+                    print(f"⌛ Telegram approval EXPIRED for token {token}. Marked denied. Will NOT post.")
+                    return
+            
+                # Still within TTL but not approved yet => STOP this run
+                print(f"⏳ Telegram decision still pending ({age_min:.1f} min old). Will NOT post on this run.")
+                return
 
             # --- Handle Remix / Custom requests (rebuild preview when requested) ---
             custom = custom_text_for(state, token) or {}  # {"x": ..., "fb": ...}
