@@ -33,7 +33,6 @@ from typing import Dict, Any, Optional, Callable, List
 
 import requests
 
-
 # ---------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------
@@ -58,7 +57,6 @@ if _ALLOWED:
         except Exception:
             pass
     TELEGRAM_ALLOWED_USER_IDS = ids if ids else None
-
 
 # ---------------------------------------------------------------------
 # Small helpers
@@ -264,6 +262,43 @@ def decision_for(state: Dict[str, Any], token: str) -> Optional[str]:
     return None
 
 
+def is_pending(state: Dict[str, Any], token: str) -> bool:
+    _ensure_state_defaults(state)
+    token = (token or "").strip()
+    return token in (state.get("pending_approvals") or {})
+
+
+def is_expired(state: Dict[str, Any], token: str, ttl_min: Optional[int] = None) -> bool:
+    """
+    Returns True if the pending approval token is older than ttl_min minutes.
+
+    Uses pending_approvals[token]["created_at"] (ISO string with trailing Z).
+    If created_at is missing or unparseable, returns False (fail-open on expiry check).
+    """
+    _ensure_state_defaults(state)
+    token = (token or "").strip()
+    if not TOKEN_RE.match(token):
+        return False
+
+    if ttl_min is None:
+        ttl_min = TELEGRAM_APPROVAL_TTL_MIN
+
+    rec = (state.get("pending_approvals") or {}).get(token) or {}
+    created_at = (rec.get("created_at") or "").strip()
+    if not created_at:
+        return False
+
+    try:
+        created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=dt.timezone.utc)
+        now = dt.datetime.now(dt.timezone.utc)
+        age_sec = (now - created_dt).total_seconds()
+        return age_sec >= float(ttl_min) * 60.0
+    except Exception:
+        return False
+
+
 def remix_count_for(state: Dict[str, Any], token: str) -> int:
     _ensure_state_defaults(state)
     return int((state.get("telegram_remix_count") or {}).get(token) or 0)
@@ -452,7 +487,10 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 state["telegram_custom_text"][token_p]["x"] = text
                 state["telegram_custom_pending"]["mode"] = "fb"
                 try:
-                    tg_send_message("✅ X text saved. Now send Facebook text (or /skip to keep default FB /done to cancel):")
+                    tg_send_message(
+                        "✅ X text saved. Now send Facebook text "
+                        "(or /skip to keep default FB /done to cancel):"
+                    )
                 except Exception:
                     pass
             else:
@@ -573,10 +611,6 @@ def wait_for_decision(
     """
     Waits for Approve/Deny on a pending token.
 
-    Compatibility:
-    - Accepts poll_interval_seconds (some callers use this name).
-    - Accepts extra kwargs without crashing (future-proof).
-
     IMPORTANT:
     - If you want this to *actually see* Telegram decisions, provide either:
         * load_state_fn, OR
@@ -611,11 +645,10 @@ def wait_for_decision(
 
     pending = (st_local.get("pending_approvals") or {}).get(token)
     if not pending:
-        # maybe already decided
         d = decision_for(st_local, token)
         return d if d in ("approved", "denied") else "denied"
 
-    created_at = pending.get("created_at") or ""
+    created_at = (pending.get("created_at") or "").strip()
     try:
         created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         if created_dt.tzinfo is None:
@@ -623,7 +656,7 @@ def wait_for_decision(
     except Exception:
         created_dt = dt.datetime.now(dt.timezone.utc)
 
-    hard_deadline = created_dt + dt.timedelta(seconds=int(ttl_min) * 60)
+    hard_deadline = created_dt + dt.timedelta(minutes=int(ttl_min))
 
     soft_deadline = None
     if max_wait_seconds is not None:
@@ -641,7 +674,6 @@ def wait_for_decision(
         st_local = _reload()
         _ensure_state_defaults(st_local)
 
-        # Prefer explicit decisions map (set by ingest_telegram_actions)
         d = decision_for(st_local, token)
         if d in ("approved", "denied"):
             return d
@@ -718,7 +750,10 @@ def maybe_send_reminders(state: Dict[str, Any], save_state_fn: Callable[[Dict[st
             continue
 
         try:
-            tg_send_message(f"⏳ Approval pending for TOKEN: {token}\nReminder: please Approve or Deny before expiry.")
+            tg_send_message(
+                f"⏳ Approval pending for TOKEN: {token}\n"
+                "Reminder: please Approve or Deny before expiry."
+            )
             state["telegram_last_reminder_at"][token] = _utc_now_z()
             changed = True
         except Exception:
