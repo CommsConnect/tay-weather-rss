@@ -1,34 +1,45 @@
+#!/usr/bin/env python3
 # tay_weather_bot.py
 #
-# Tay Township Weather Bot (Final "F" style)
+# Tay Township Weather Bot (Final "F" style) — UPDATED for best practices + security
+#
+# ✅ IMPORTANT (per your instruction):
+#   The severity emoji logic in `severity_emoji()` is LEFT EXACTLY AS-IS.
+#   Do not change it. It is the sole source of truth for 🟡🟠🔴.
 #
 # PURPOSE
 #   - Reads Environment Canada ATOM alert feed (source of truth)
-#   - Writes an RSS file (tay-weather.xml) for your site/consumers
-#   - Posts to X (Twitter) and Facebook when enabled
+#   - Writes an RSS file (tay-weather.xml)
+#   - Posts to X and Facebook when enabled
 #   - Uses Telegram as an approval gate / preview channel
-#   - Chooses images in this order:
-#       (1) Google Drive folder (your curated photos)  ✅ FIRST
-#       (2) Ontario 511 highway cameras (CR-29)        ✅ FALLBACK
+#   - Chooses images:
+#       (1) Google Drive folder (curated photos)  ✅ FIRST
+#       (2) Ontario 511 highway cameras (CR-29)  ✅ FALLBACK
 #       BUT:
-#         - If the alert is a WIND WARNING, do NOT use highway camera images
-#           (so a "wind warning" won’t show winter-road cameras)
+#         - If alert is a WIND WARNING, do NOT use highway camera images
 #
-# CARE STATEMENTS (Facebook only)
-#   - X should be clean/short and NOT include the care statement.
-#   - Facebook SHOULD append a care statement pulled from the Google Sheet
-#     tab: "CareStatements"
+# CARE STATEMENTS
+#   - X should be clean/short and NOT include care statement by default
+#   - Facebook SHOULD append a care statement from Google Sheet tab: CareStatements
 #
 # MORE LINK RULE
-#   - Always prefer TAY_ALERTS_URL first
-#   - If TAY_ALERTS_URL is missing or unreachable, fall back to TAY_COORDS_URL
+#   - Prefer TAY_ALERTS_URL first
+#   - If missing/unreachable, fall back to TAY_COORDS_URL
+#
+# SECURITY / OPS BEST PRACTICES INCLUDED
+#   - No secret values printed
+#   - Strict NO_POST_MODE safety gate (RUN_MODE != live)
+#   - Atomic state/RSS writes
+#   - Timeouts + basic retry/backoff for network calls
+#   - Telegram wait_for_decision reloads state from disk each poll (state_path)
+#   - Telegram polling can ingest updates each poll (ingest_each_poll=True)
 #
 # REQUIRED GitHub Secrets (X OAuth 2.0 posting):
 #   X_CLIENT_ID
 #   X_CLIENT_SECRET
 #   X_REFRESH_TOKEN
 #
-# REQUIRED GitHub Secrets (X media upload via OAuth 1.0a user context):
+# REQUIRED GitHub Secrets (X media upload via OAuth 1.0a):
 #   X_API_KEY
 #   X_API_SECRET
 #   X_ACCESS_TOKEN
@@ -38,7 +49,7 @@
 #   FB_PAGE_ID
 #   FB_PAGE_ACCESS_TOKEN
 #
-# OPTIONAL GitHub Secrets (Google Sheet + Drive for care statements + curated photos):
+# OPTIONAL GitHub Secrets (Google Sheet + Drive):
 #   GOOGLE_SHEET_ID
 #   GOOGLE_SERVICE_ACCOUNT_JSON
 #   GOOGLE_DRIVE_FOLDER_ID
@@ -60,7 +71,9 @@
 #
 # NEW workflow env var:
 #   RUN_MODE=live|test_telegram_buttons_no_post|test_sample_alert_no_post
-#
+
+from __future__ import annotations
+
 import base64
 import datetime as dt
 import email.utils
@@ -86,14 +99,10 @@ from telegram_gate import (
     ingest_telegram_actions,
     maybe_send_reminders,
     ensure_preview_sent,
-    update_preview,
     decision_for,
-    is_pending,
-    mark_denied,
     remix_count_for,
     custom_text_for,
-    clear_custom_text,
-    wait_for_decision,  # ✅ FIX: ensure this is imported (prevents NameError)
+    wait_for_decision,   # ✅ must be imported
     is_expired,
     tg_send_message,
 )
@@ -116,7 +125,6 @@ TEST_FACEBOOK = os.getenv("TEST_FACEBOOK", "false").lower() == "true"
 # RUN MODES (hard safety gate)
 # =============================================================================
 RUN_MODE = (os.getenv("RUN_MODE", "live") or "live").strip().lower()
-
 _VALID_RUN_MODES = {
     "live",
     "test_telegram_buttons_no_post",
@@ -172,14 +180,42 @@ COOLDOWN_MINUTES = {
 }
 GLOBAL_COOLDOWN_MINUTES = 5
 
+# =============================================================================
+# HTTP session (basic retry/backoff)
+# =============================================================================
+_SESSION = requests.Session()
+_SESSION.headers.update({"User-Agent": USER_AGENT})
+
+
+def _http_get(url: str, *, timeout: Tuple[int, int] = (10, 30), retries: int = 2) -> requests.Response:
+    last: Optional[Exception] = None
+    for i in range(retries + 1):
+        try:
+            r = _SESSION.get(url, timeout=timeout, allow_redirects=True)
+            r.raise_for_status()
+            return r
+        except Exception as e:
+            last = e
+            time.sleep(1.0 * (i + 1))
+    raise last if last else RuntimeError("HTTP GET failed")
+
+
+def _http_head(url: str, *, timeout: Tuple[int, int] = (5, 15), retries: int = 1) -> requests.Response:
+    last: Optional[Exception] = None
+    for i in range(retries + 1):
+        try:
+            r = _SESSION.head(url, timeout=timeout, allow_redirects=True)
+            return r
+        except Exception as e:
+            last = e
+            time.sleep(0.75 * (i + 1))
+    raise last if last else RuntimeError("HTTP HEAD failed")
+
 
 # =============================================================================
 # Telegram helper: final "test succeeded" confirmation
 # =============================================================================
 def tg_send_test_success(note: str = "") -> None:
-    """
-    Sends a final confirmation message to Telegram for MANUAL TEST RUNS.
-    """
     if not TELEGRAM_ENABLE_GATE:
         return
     try:
@@ -191,36 +227,7 @@ def tg_send_test_success(note: str = "") -> None:
         print(f"⚠️ Telegram test success message failed: {e}")
 
 
-def warning_delay_elapsed(state: Dict[str, Any], token: str) -> bool:
-    """
-    WARNING policy:
-      - Wait TELEGRAM_PREVIEW_DELAY_MIN minutes after preview was created,
-        unless denied.
-    """
-    delay_min = int(os.getenv("TELEGRAM_PREVIEW_DELAY_MIN", "15"))
-    pending = (state.get("pending_approvals") or {}).get(token) or {}
-    created_at = pending.get("created_at")
-
-    if not created_at:
-        # If we don't know when it was created, allow immediately (fails open)
-        return True
-
-    try:
-        created_ts = int(created_at)
-    except Exception:
-        try:
-            created_ts = int(float(created_at))
-        except Exception:
-            return True
-
-    return (int(time.time()) - created_ts) >= (delay_min * 60)
-
-
 def _no_post_guard(platform: str) -> bool:
-    """
-    Hard safety gate.
-    Returns True if posting should be blocked.
-    """
     if NO_POST_MODE:
         print(f"🧯 NO-POST MODE ACTIVE ({RUN_MODE}) — blocked posting to {platform}.")
         return True
@@ -276,9 +283,6 @@ def severity_emoji(title: str) -> str:
 
 
 def classify_alert_kind(title: str) -> str:
-    """
-    Used for cooldown bucket AND Telegram gate policy.
-    """
     t = (title or "").lower()
     if "warning" in t:
         return "warning"
@@ -292,24 +296,39 @@ def classify_alert_kind(title: str) -> str:
 
 
 # =============================================================================
+# Atomic file writes (state + RSS)
+# =============================================================================
+def _atomic_write_text(path: str, text: str) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _atomic_write_bytes(path: str, data: bytes) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+# =============================================================================
 # State file (dedupe/cooldowns/telegram gate memory)
 # =============================================================================
 def load_state() -> dict:
     default = {
-        "seen_ids": [],
         "posted_guids": [],
         "posted_text_hashes": [],
         "cooldowns": {},
         "global_last_post_ts": 0,
 
-        # Telegram gate state
+        # Telegram gate state (telegram_gate.py manages most keys)
         "pending_approvals": {},
         "approval_decisions": {},
         "telegram_last_update_id": 0,
-        "telegram_last_signal": None,
         "test_gate_token": "",
 
-        # for remix/custom refresh bookkeeping
+        # remix/custom refresh bookkeeping
         "telegram_last_remix_seen": {},
     }
 
@@ -332,17 +351,16 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    state["seen_ids"] = state.get("seen_ids", [])[-5000:]
-    state["posted_guids"] = state.get("posted_guids", [])[-5000:]
-    state["posted_text_hashes"] = state.get("posted_text_hashes", [])[-5000:]
+    # cap growth
+    state["posted_guids"] = (state.get("posted_guids") or [])[-5000:]
+    state["posted_text_hashes"] = (state.get("posted_text_hashes") or [])[-5000:]
 
     cds = state.get("cooldowns", {})
     if isinstance(cds, dict) and len(cds) > 5000:
         items = sorted(cds.items(), key=lambda kv: kv[1], reverse=True)[:4000]
         state["cooldowns"] = dict(items)
 
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    _atomic_write_text(STATE_PATH, json.dumps(state, indent=2))
 
 
 # =============================================================================
@@ -387,13 +405,13 @@ def _url_looks_ok(url: str) -> bool:
     if not url:
         return False
     try:
-        r = requests.head(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
+        r = _http_head(url, timeout=(5, 15), retries=1)
         if r.status_code < 400:
             return True
     except Exception:
         pass
     try:
-        r = requests.get(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
+        r = _http_get(url, timeout=(5, 15), retries=1)
         return r.status_code < 400
     except Exception:
         return False
@@ -438,13 +456,13 @@ def fetch_feed_entries(
 
     for attempt in range(retries):
         try:
-            r = requests.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+            r = _SESSION.get(feed_url, timeout=timeout)
             r.raise_for_status()
             root = ET.fromstring(r.content)
 
             entries: List[Dict[str, Any]] = []
 
-            # --- Atom ---
+            # Atom
             if "Atom" in (root.tag or "") or root.tag.endswith("feed"):
                 for e in root.findall("a:entry", ATOM_NS):
                     title = (e.findtext("a:title", default="", namespaces=ATOM_NS) or "").strip()
@@ -471,7 +489,7 @@ def fetch_feed_entries(
                         }
                     )
 
-            # --- RSS 2.0 ---
+            # RSS 2.0
             else:
                 ch = root.find("channel") if root.tag == "rss" else root.find(".//channel")
                 if ch is not None:
@@ -531,9 +549,7 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
     if not official_url:
         return []
 
-    r = requests.get(official_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
-    r.raise_for_status()
-
+    r = _http_get(official_url, timeout=(10, 30), retries=1)
     soup = BeautifulSoup(r.text, "html.parser")
     raw = soup.get_text("\n")
     lines = [ln.strip() for ln in raw.splitlines()]
@@ -568,6 +584,7 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
     if out:
         return out[:2]
 
+    # fallback: first relevant-ish sentence
     weather_keywords = (
         "snow", "snowfall", "squall", "rain", "freezing", "ice", "wind", "fog",
         "visibility", "blowing", "drifting", "thunder", "heat", "cold",
@@ -596,7 +613,12 @@ def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
     if not sheet_id or not sa_json:
         return None, None, "", drive_folder_id
 
-    info = json.loads(sa_json)
+    try:
+        info = json.loads(sa_json)
+    except Exception:
+        print("⚠️ GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON. Skipping Google services.")
+        return None, None, "", drive_folder_id
+
     creds = service_account.Credentials.from_service_account_info(
         info,
         scopes=[
@@ -772,12 +794,7 @@ def pick_drive_images(
         "⚪": ["white", "statement", "other"],
     }.get(severity, [])
 
-    q = (
-        f"'{folder_id}' in parents and trashed = false and "
-        "("
-        "mimeType contains 'image/'"
-        ")"
-    )
+    q = f"'{folder_id}' in parents and trashed = false and (mimeType contains 'image/')"
 
     resp = drive_svc.files().list(
         q=q,
@@ -810,9 +827,8 @@ def pick_drive_images(
         if len(picked) >= max_images:
             break
         fid = (f.get("id") or "").strip()
-        if not fid:
-            continue
-        picked.append(f"drive://{fid}")
+        if fid:
+            picked.append(f"drive://{fid}")
 
     return picked[:max_images]
 
@@ -850,7 +866,7 @@ def is_image_url(url: str) -> bool:
         return False
 
     try:
-        r = requests.head(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
+        r = _http_head(url, timeout=(5, 15), retries=1)
         ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if r.status_code < 400 and ct.startswith("image/"):
             return True
@@ -858,7 +874,7 @@ def is_image_url(url: str) -> bool:
         pass
 
     try:
-        r = requests.get(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 20))
+        r = _http_get(url, timeout=(5, 20), retries=1)
         ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         return r.status_code < 400 and ct.startswith("image/")
     except Exception:
@@ -870,8 +886,7 @@ def fetch_on511_cameras() -> List[Dict[str, Any]]:
     if _ON511_CAMERAS_CACHE is not None:
         return _ON511_CAMERAS_CACHE
 
-    r = requests.get(ON511_CAMERAS_API, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
-    r.raise_for_status()
+    r = _http_get(ON511_CAMERAS_API, timeout=(10, 30), retries=1)
     data = r.json()
     if not isinstance(data, list):
         raise RuntimeError("Unexpected 511 cameras payload (expected list).")
@@ -938,7 +953,6 @@ def resolve_cr29_image_urls() -> List[str]:
     south_env = (os.getenv("CR29_SOUTH_IMAGE_URL") or "").strip()
 
     urls: List[str] = []
-
     for u in [north_env, south_env]:
         if u and is_image_url(u) and u not in urls:
             urls.append(u)
@@ -959,7 +973,7 @@ def resolve_cr29_image_urls() -> List[str]:
 
 
 # =============================================================================
-# On511 camera "bug" overlay for Ontario 511 images (stamp lower-right)
+# On511 camera "bug" overlay
 # =============================================================================
 def apply_on511_bug(image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
     BUG_RELATIVE_WIDTH = 0.07
@@ -1002,9 +1016,7 @@ def download_image_bytes(image_url: str) -> Tuple[bytes, str]:
     if not image_url:
         raise RuntimeError("No image_url provided")
 
-    r = requests.get(image_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30), allow_redirects=True)
-    r.raise_for_status()
-
+    r = _http_get(image_url, timeout=(10, 30), retries=1)
     content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
     if not content_type.startswith("image/"):
         raise RuntimeError(f"URL did not return an image. Content-Type={content_type}")
@@ -1077,8 +1089,7 @@ def write_rotated_refresh_token(new_refresh: str) -> None:
     new_refresh = (new_refresh or "").strip()
     if not new_refresh:
         return
-    with open(ROTATED_X_REFRESH_TOKEN_PATH, "w", encoding="utf-8") as f:
-        f.write(new_refresh)
+    _atomic_write_text(ROTATED_X_REFRESH_TOKEN_PATH, new_refresh)
 
 
 def get_oauth2_access_token() -> str:
@@ -1107,7 +1118,6 @@ def get_oauth2_access_token() -> str:
         data={"grant_type": "refresh_token", "refresh_token": refresh_token},
         timeout=30,
     )
-    print("X token refresh status:", r.status_code)
     r.raise_for_status()
 
     payload = r.json()
@@ -1117,7 +1127,8 @@ def get_oauth2_access_token() -> str:
 
     new_refresh = payload.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
-        print("⚠️ X refresh token rotated. Workflow will update the repo secret.")
+        # ✅ do not print token values; only log the event
+        print("⚠️ X refresh token rotated. A rotated token file was written for the workflow to sync secrets.")
         write_rotated_refresh_token(new_refresh)
 
     return access
@@ -1150,7 +1161,6 @@ def x_upload_media(image_ref: str) -> str:
     files = {"media": ("image", img_bytes, mime_type)}
     r = requests.post(upload_url, auth=auth, files=files, timeout=60)
 
-    print("X media upload status:", r.status_code)
     if r.status_code >= 400:
         raise RuntimeError(f"X media upload failed {r.status_code}")
 
@@ -1165,7 +1175,6 @@ def x_upload_media(image_ref: str) -> str:
 def post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, Any]:
     url = "https://api.x.com/2/tweets"
     access_token = get_oauth2_access_token()
-
     payload: Dict[str, Any] = {"text": text}
 
     image_refs = [u for u in (image_refs or []) if (u or "").strip()]
@@ -1190,8 +1199,6 @@ def post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, An
         timeout=20,
     )
 
-    print("X POST /2/tweets status:", r.status_code)
-
     if r.status_code >= 400:
         detail = ""
         try:
@@ -1199,10 +1206,8 @@ def post_to_x(text: str, image_refs: Optional[List[str]] = None) -> Dict[str, An
             detail = (j.get("detail") or "").lower()
         except Exception:
             pass
-
         if r.status_code == 403 and "duplicate" in detail:
             raise RuntimeError("X_DUPLICATE_TWEET")
-
         raise RuntimeError(f"X post failed {r.status_code}")
 
     return r.json()
@@ -1238,13 +1243,13 @@ def ensure_rss_exists() -> None:
 
     rss = ET.Element("rss", version="2.0")
     channel = ET.SubElement(rss, "channel")
-
     ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
     ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
     ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
     ET.SubElement(channel, "language").text = "en-ca"
 
-    ET.ElementTree(rss).write(RSS_PATH, encoding="utf-8", xml_declaration=True)
+    data = ET.tostring(rss, encoding="utf-8", xml_declaration=True)
+    _atomic_write_bytes(RSS_PATH, data)
 
 
 def load_rss_tree() -> Tuple[ET.ElementTree, ET.Element]:
@@ -1308,31 +1313,24 @@ def build_rss_description_from_atom(entry: Dict[str, Any], more_url: str) -> str
 # Social text formatting
 # =============================================================================
 def _pretty_title_for_social(title: str) -> str:
-    """
-    Converts EC banner title like:
-      "Yellow Warning - Snowfall"
-    into:
-      "Snowfall warning in Tay Township"
-    """
     t = (title or "").strip()
-
     m = re.match(r"^(yellow|orange|red)\s+(warning|watch|advisory)\s*-\s*(.+)$", t, flags=re.IGNORECASE)
     if m:
         alert_type = m.group(2).lower().strip()
         hazard = m.group(3).strip()
         hazard = hazard[:1].upper() + hazard[1:] if hazard else hazard
         return f"{hazard} {alert_type} in Tay Township"
-
     t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
     return f"{t} in Tay Township"
 
 
 def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
-    care_to_add = (custom_x if custom_x else care).strip()
+    # X default: NO care statement; only include custom text if user provides it
+    care_to_add = (custom_x or "").strip()
 
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
-    sev = severity_emoji(title_raw)
+    sev = severity_emoji(title_raw)  # ✅ unchanged
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
@@ -1373,11 +1371,11 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     return text_min[:277].rstrip() + "..."
 
 
-def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) -> str:
+def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, custom_fb: str = "") -> str:
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
 
-    sev = severity_emoji(title_raw)
+    sev = severity_emoji(title_raw)  # ✅ unchanged
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
@@ -1394,6 +1392,10 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str) ->
     if care:
         parts.append("")
         parts.append(care.strip())
+
+    if custom_fb.strip():
+        parts.append("")
+        parts.append(custom_fb.strip())
 
     parts.append("")
     parts.append("Environment Canada")
@@ -1413,7 +1415,7 @@ def choose_images_for_alert(
     alert_type_label: str,
     severity: str,
 ) -> List[str]:
-    drive_refs: List[str] = []
+    # 1) Drive first
     if drive_svc and drive_folder_id:
         try:
             drive_refs = pick_drive_images(
@@ -1423,14 +1425,12 @@ def choose_images_for_alert(
                 severity=severity,
                 max_images=2,
             )
+            if drive_refs:
+                return drive_refs[:2]
         except Exception as e:
             print(f"⚠️ Drive image selection failed: {e}")
-            drive_refs = []
 
-    if drive_refs:
-        return drive_refs[:2]
-
-    # Policy: If WIND WARNING, do not use highway camera images
+    # 2) Camera fallback — but never for WIND WARNING
     if alert_kind == "warning" and "wind" in (alert_type_label or "").lower():
         return []
 
@@ -1442,27 +1442,70 @@ def choose_images_for_alert(
 
 
 # =============================================================================
-# Telegram decision helper (robust)
+# Telegram gate policy helpers
 # =============================================================================
+def _parse_iso_z(s: str) -> Optional[dt.datetime]:
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=dt.timezone.utc)
+        return d.astimezone(dt.timezone.utc)
+    except Exception:
+        return None
+
+
+def warning_delay_elapsed(state: Dict[str, Any], token: str) -> bool:
+    """
+    WARNING policy:
+      - Wait TELEGRAM_PREVIEW_DELAY_MIN minutes after preview was created, unless denied.
+
+    NOTE:
+      telegram_gate.py stores pending_approvals[token]["created_at"] as ISO "....Z"
+      This function parses that correctly (no unix-int assumptions).
+    """
+    delay_min = int(os.getenv("TELEGRAM_PREVIEW_DELAY_MIN", "15"))
+    pending = (state.get("pending_approvals") or {}).get(token) or {}
+    created_at = (pending.get("created_at") or "").strip()
+
+    created_dt = _parse_iso_z(created_at)
+    if not created_dt:
+        # fail-open: if we cannot parse, allow
+        return True
+
+    now = dt.datetime.now(dt.timezone.utc)
+    return (now - created_dt).total_seconds() >= (delay_min * 60)
+
+
 def wait_for_decision_safe(state: Dict[str, Any], token: str) -> str:
     """
     For non-warning alerts, we wait up to TELEGRAM_WAIT_SECONDS for APPROVE/DENY.
     If no approval is received, we treat it as DENIED (safe default).
+
+    BEST PRACTICE:
+      Provide state_path so wait_for_decision reloads from disk each poll.
+      Provide ingest_each_poll=True so we actually ingest Telegram updates each poll.
     """
     wait_seconds = int(os.getenv("TELEGRAM_WAIT_SECONDS", "600"))
+    ttl_min = int(os.getenv("TELEGRAM_APPROVAL_TTL_MIN", "60"))
+
     try:
         d = wait_for_decision(
-            state,
-            save_state,
-            token,
+            st=state,
+            token=token,
+            save_state_fn=save_state,
+            ttl_min=ttl_min,
+            poll_interval_seconds=2,
             max_wait_seconds=wait_seconds,
-            poll_interval_seconds=4,
+            state_path=STATE_PATH,
+            ingest_each_poll=True,
         )
     except Exception as e:
         print(f"⚠️ wait_for_decision failed ({e}); treating as denied.")
         d = "denied"
 
-    # Anything other than explicit approved is treated as denied for safety
     return d if d in ("approved", "denied") else "denied"
 
 
@@ -1472,7 +1515,7 @@ def wait_for_decision_safe(state: Dict[str, Any], token: str) -> str:
 def main() -> None:
     more_url = resolve_more_info_url()
 
-    # cleanup rotated token file
+    # cleanup rotated token file (so workflow can detect fresh rotations)
     if os.path.exists(ROTATED_X_REFRESH_TOKEN_PATH):
         try:
             os.remove(ROTATED_X_REFRESH_TOKEN_PATH)
@@ -1499,9 +1542,7 @@ def main() -> None:
         maybe_send_reminders(st, save_state)
 
         token = (st.get("test_gate_token") or "").strip()
-        created_at = None
-        if token:
-            created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
+        created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at") if token else None
 
         if (
             (not token)
@@ -1531,7 +1572,7 @@ def main() -> None:
             x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
             fb_text = build_facebook_post_text(fake_entry, care="", more_url=more_url)
             preview_text = (
-                f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
+                "🧪 TEST MODE: Sample alert (NO POST)\n\n"
                 f"----- X (NO POST) -----\n{x_text}\n\n"
                 f"----- Facebook (NO POST) -----\n{fb_text}\n\n"
                 f"RUN_MODE: {RUN_MODE}\n"
@@ -1540,14 +1581,7 @@ def main() -> None:
             )
             kind_for_buttons = classify_alert_kind(fake_entry["title"])
 
-        ensure_preview_sent(
-            st,
-            save_state,
-            token,
-            preview_text,
-            kind=kind_for_buttons,
-            image_urls=test_images,
-        )
+        ensure_preview_sent(st, save_state, token, preview_text, kind=kind_for_buttons, image_urls=test_images)
 
         d = decision_for(st, token)
         if d not in ("approved", "denied"):
@@ -1585,9 +1619,7 @@ def main() -> None:
             maybe_send_reminders(st, save_state)
 
             token = (st.get("test_gate_token") or "").strip()
-            created_at = None
-            if token:
-                created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
+            created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at") if token else None
 
             if (
                 (not token)
@@ -1662,7 +1694,6 @@ def main() -> None:
     try:
         care_rows = load_care_statements_rows()
         print(f"CareStatements: loaded {len(care_rows)} rows")
-        # ✅ DEBUG: show header keys so you can confirm the sheet columns match
         if care_rows:
             print("CareStatements: sample keys:", sorted(care_rows[0].keys()))
     except Exception as e:
@@ -1715,14 +1746,7 @@ def main() -> None:
         description = build_rss_description_from_atom(entry, more_url=more_url)
 
         if not rss_item_exists(channel, guid):
-            add_rss_item(
-                channel,
-                title=title,
-                link=link,
-                guid=guid,
-                pub_date=pub_date,
-                description=description,
-            )
+            add_rss_item(channel, title=title, link=link, guid=guid, pub_date=pub_date, description=description)
 
         if guid in posted:
             continue
@@ -1735,11 +1759,9 @@ def main() -> None:
             continue
 
         title_raw = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
-
-        # ✅ FIX: type_label must be a real type bucket, not the full title
         type_label = classify_alert_kind(title_raw)
 
-        # ✅ severity emoji remains EXACTLY as your existing logic
+        # ✅ severity emoji remains EXACTLY your existing logic
         sev = severity_emoji(title_raw)
 
         care = ""
@@ -1750,7 +1772,6 @@ def main() -> None:
                     print(f"CareStatements: matched ({sev} / {type_label})")
                 else:
                     print(f"CareStatements: no match for ({sev} / {type_label})")
-                # ✅ DEBUG: show what was chosen
                 print("CareStatements: chosen text:", (care[:120] + "…") if care and len(care) > 120 else care)
             except Exception as e:
                 print(f"⚠️ Care statement match failed: {e}")
@@ -1764,7 +1785,8 @@ def main() -> None:
             severity=sev,
         )
 
-        x_text = build_x_post_text(entry, more_url=more_url, care=care)
+        # X: no care statement by default
+        x_text = build_x_post_text(entry, more_url=more_url, care="")
         fb_text = build_facebook_post_text(entry, care=care, more_url=more_url)
 
         h = text_hash(x_text)
@@ -1792,9 +1814,9 @@ def main() -> None:
 
             ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind, image_urls=image_refs)
 
-            # ✅ Decision rules:
-            #   - WARNING: if denied => do not post; if approved => post; else auto-post after delay.
-            #   - OTHER: must be approved (wait up to TELEGRAM_WAIT_SECONDS); timeout => denied.
+            # Decision rules:
+            #   - WARNING: denied => do not post; approved looks immediate; else auto-post after delay unless denied.
+            #   - OTHER: must be explicitly approved (wait up to TELEGRAM_WAIT_SECONDS); timeout => denied.
             d = decision_for(state, token)
 
             if alert_kind == "warning":
@@ -1802,23 +1824,22 @@ def main() -> None:
                     print(f"🛑 Telegram denied for WARNING token={token}. Skipping.")
                     continue
                 if d != "approved":
-                    # not approved yet — only proceed if delay elapsed and STILL not denied
                     if not warning_delay_elapsed(state, token):
                         print(f"⏳ WARNING waiting for delay window (token={token}). Not posting this run.")
                         continue
-                    # refresh decisions after delay window
+
+                    # After delay window, re-ingest and re-check deny (safety)
                     ingest_telegram_actions(state, save_state)
                     d2 = decision_for(state, token)
                     if d2 == "denied":
                         print(f"🛑 Telegram denied during delay window (token={token}). Skipping.")
                         continue
-                    # if still pending, allow auto-post after delay
+
                     print(f"✅ WARNING delay elapsed and not denied (token={token}). Proceeding to post.")
                 else:
                     print(f"✅ Telegram approved for WARNING token={token}. Proceeding to post.")
 
             else:
-                # watch/advisory/statement/other must be explicitly approved
                 if d not in ("approved", "denied"):
                     d = wait_for_decision_safe(state, token)
 
@@ -1851,7 +1872,8 @@ def main() -> None:
                         print(f"⚠️ Care remix failed: {e}")
                         care2 = care
 
-                x_text2 = build_x_post_text(entry, more_url=more_url, care=care2)
+                # rebuild base posts
+                x_text2 = build_x_post_text(entry, more_url=more_url, care="")
                 fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url)
 
                 x_note = ""
@@ -1864,7 +1886,7 @@ def main() -> None:
                         x_note = f"⚠️ X custom text too long by {over} chars (not applied)."
 
                 if fb_extra:
-                    fb_text2 = fb_text2 + "\n\n" + fb_extra
+                    fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url, custom_fb=fb_extra)
 
                 care = care2
                 x_text = x_text2
@@ -1919,17 +1941,16 @@ def main() -> None:
         if posted_this:
             posted.add(guid)
             posted_text_hashes.add(h)
-
             state["posted_guids"] = list(posted)
             state["posted_text_hashes"] = list(posted_text_hashes)
-
             mark_posted(state, DISPLAY_AREA_NAME, kind=alert_kind)
             save_state(state)
 
-    # --- Write RSS file at end
+    # --- Write RSS file at end (atomic)
     try:
         trim_rss_items(channel, MAX_RSS_ITEMS)
-        tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
+        data = ET.tostring(tree.getroot(), encoding="utf-8", xml_declaration=True)
+        _atomic_write_bytes(RSS_PATH, data)
     except Exception as e:
         print(f"⚠️ Failed writing RSS to {RSS_PATH}: {e}")
 
