@@ -2,14 +2,14 @@
   "seen_ids": [],
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:20260110044541",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
     "tag:weather.gc.ca,2013-04-16:20260110044538",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744"
   ],
   "posted_text_hashes": [
     "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
