@@ -55,15 +55,19 @@
     "9e9b11f786": {
       "decision": "denied",
       "decided_at": "2026-01-10T02:09:57Z"
+    },
+    "bc8dcfa013": {
+      "decision": "approved",
+      "decided_at": "2026-01-10T02:11:24Z"
     }
   },
-  "telegram_last_update_id": 259933362,
+  "telegram_last_update_id": 259933363,
   "telegram_last_signal": {
     "token": "8a7345cd7a",
     "decision": "approved",
     "decided_at": "2026-01-05T19:01:12Z"
   },
-  "test_gate_token": "9e9b11f786",
+  "test_gate_token": "bc8dcfa013",
   "fb_last_posted_at": "2026-01-05T19:01:18.268848Z",
   "fb_cooldown_until": "2026-01-05T20:01:18.268848Z",
   "telegram_last_remix_seen": {},
