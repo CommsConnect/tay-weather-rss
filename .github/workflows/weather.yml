@@ -70,8 +70,8 @@ jobs:
       # These are "defaults". We will OVERRIDE them per-run in a later step
       # ("Resolve posting toggles") using $GITHUB_ENV.
       # -------------------------------------------------------------------
-      ENABLE_X_POSTING: true
-      ENABLE_FB_POSTING: true
+      ENABLE_X_POSTING: "true"
+      ENABLE_FB_POSTING: "true"
 
       # --- Manual run mode controls ---
       RUN_MODE: ${{ github.event.inputs.run_mode || 'live' }}
@@ -81,9 +81,8 @@ jobs:
       TEST_X: ${{ github.event.inputs.test_x || 'false' }}
       TEST_FACEBOOK: ${{ github.event.inputs.test_facebook || 'false' }}
 
-      # >>> INSERT HERE: manual allow-real-FB toggle (used by resolver step below)
+      # Manual allow-real-FB toggle (used by resolver step below)
       POST_FACEBOOK: ${{ github.event.inputs.post_facebook || 'false' }}
-      # <<< END INSERT
 
       # Optional backward compatibility (safe to remove later)
       TEST_TWEET: ${{ github.event.inputs.test_x || 'false' }}
@@ -100,9 +99,9 @@ jobs:
       CONTENT_CONFIG_XLSX: content_config.xlsx
 
       # --- Facebook safety ---
-      FB_COOLDOWN_SECONDS: 3600      # 1 hour between successful FB posts
-      FB_BLOCK_SECONDS: 21600        # 6 hours if rate-limited
-      FB_JITTER_SECONDS: 10          # small randomness to avoid burst detection
+      FB_COOLDOWN_SECONDS: "3600"      # 1 hour between successful FB posts
+      FB_BLOCK_SECONDS: "21600"        # 6 hours if rate-limited
+      FB_JITTER_SECONDS: "10"          # small randomness to avoid burst detection
 
       # --- Telegram approval gate ---
       TELEGRAM_ENABLE_GATE: "true"
@@ -124,7 +123,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # >>> INSERT HERE: resolve final posting toggles based on RUN_MODE + inputs
+      # -------------------------------------------------------------------
+      # Resolve final posting toggles based on RUN_MODE + inputs
+      # -------------------------------------------------------------------
       - name: Resolve posting toggles
         shell: bash
         run: |
@@ -188,9 +189,13 @@ jobs:
 
           echo "Final: ENABLE_X_POSTING=$ENABLE_X"
           echo "Final: ENABLE_FB_POSTING=$ENABLE_FB"
-      # <<< END INSERT
 
       - name: Sanity check config (non-secret)
+        env:
+          # Presence-only checks so this step prints set/missing correctly
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: |
           echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
           echo "RUN_MODE=$RUN_MODE"
@@ -225,11 +230,10 @@ jobs:
 
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
         run: |
           missing=0
 
-          # >>> INSERT HERE: only require X secrets if X is enabled this run
+          # Only require X secrets if X is enabled this run
           if [ "$ENABLE_X_POSTING" = "true" ]; then
             for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
               if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
@@ -241,7 +245,6 @@ jobs:
           else
             echo "X disabled for this run; skipping X secret checks."
           fi
-          # <<< END INSERT
 
           # Only require FB secrets if FB is enabled this run
           if [ "$ENABLE_FB_POSTING" = "true" ]; then
@@ -289,7 +292,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_APPROVAL_TTL_MIN: ${{ secrets.TELEGRAM_APPROVAL_TTL_MIN }}
-
         run: |
           python tay_weather_bot.py
 
