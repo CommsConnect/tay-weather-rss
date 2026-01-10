@@ -421,16 +421,27 @@ def wait_for_decision(
     ttl_min: int,
     poll_seconds: int = 2,
     max_wait_seconds: int | None = None,
+    poll_interval_seconds: int | None = None,   # <-- alias supported
+    **kwargs,                                   # <-- swallow unexpected args safely
 ):
     """
     Waits for Approve/Deny on a pending token.
 
+    Compatibility:
+    - Accepts poll_interval_seconds (some callers use this name).
+    - Accepts extra kwargs without crashing (future-proof).
+
+    Notes:
     - ttl_min is the “hard expiry” for the pending approval.
     - max_wait_seconds optionally caps the wait time for THIS run (useful in Actions).
       If provided, we stop waiting after max_wait_seconds even if ttl hasn’t expired.
     """
     import time
     import datetime as dt
+
+    # If caller provided poll_interval_seconds, use it
+    if poll_interval_seconds is not None:
+        poll_seconds = int(poll_interval_seconds)
 
     pending = (st.get("pending_approvals") or {}).get(token)
     if not pending:
@@ -455,8 +466,10 @@ def wait_for_decision(
         soft_deadline = None
 
     while True:
-        # refresh state each loop (important if another process writes state.json)
-        st = st if isinstance(st, dict) else {}
+        # NOTE: This function can only "refresh" if the caller updates `st`.
+        # If you want true refresh-from-disk, the caller should reload state.json
+        # and pass the updated `st` back in (or refactor to accept a load_state_fn).
+
         pending = (st.get("pending_approvals") or {}).get(token)
         if not pending:
             return "denied"
