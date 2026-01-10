@@ -49,6 +49,13 @@
       "reminded_at": null,
       "buttons_message_id": 76,
       "buttons_chat_id": "-5222293769"
+    },
+    "d1d34d2c8b": {
+      "created_at": "2026-01-10T00:21:14Z",
+      "preview_text": "\ud83e\uddea TEST MODE: Sample alert (NO POST)\n\n----- X (NO POST) -----\n\ud83d\udfe1 - Snowfall advisory in Tay Township\nStrong winds with gusts of 70 to 90 km/h.\nThis evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (NO POST) -----\n\ud83d\udfe1 - Snowfall advisory in Tay Township\nStrong winds with gusts of 70 to 90 km/h.\nThis evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nRUN_MODE: test_sample_alert_no_post\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n\nTOKEN: d1d34d2c8b",
+      "kind": "advisory",
+      "buttons_message_id": 95,
+      "buttons_chat_id": "-5222293769"
     }
   },
   "approval_decisions": {
@@ -67,7 +74,11 @@
     "decision": "approved",
     "decided_at": "2026-01-05T19:01:12Z"
   },
-  "test_gate_token": "",
+  "test_gate_token": "d1d34d2c8b",
   "fb_last_posted_at": "2026-01-05T19:01:18.268848Z",
-  "fb_cooldown_until": "2026-01-05T20:01:18.268848Z"
+  "fb_cooldown_until": "2026-01-05T20:01:18.268848Z",
+  "telegram_last_remix_seen": {},
+  "telegram_remix_count": {},
+  "telegram_custom_pending": null,
+  "telegram_custom_text": {}
 }
