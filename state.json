@@ -2,22 +2,33 @@
   "seen_ids": [],
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337"
   ],
   "posted_text_hashes": [
-    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
     "788b264da1732b8d7f5e6869a5de1afd50b85290",
-    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e"
+    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
+    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
+    "6f927e08253fe620675bc55235d81cfdd8df3b7f"
   ],
   "cooldowns": {
-    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1767639695,
+    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768014961,
     "8cba3a1a17596318031764df06a0b1df5e042d7f": 1767610573
   },
-  "global_last_post_ts": 1767639695,
-  "pending_approvals": {},
+  "global_last_post_ts": 1768014961,
+  "pending_approvals": {
+    "1442bb5761": {
+      "created_at": "2026-01-10T03:15:07Z",
+      "preview_text": "\ud83d\udea8 SPECIAL WEATHER STATEMENT (Tay Township area)\n\n----- X (will post) -----\nSPECIAL WEATHER STATEMENT in Tay Township\nStrong winds with gusts of 70 to 90 km/h.\nThis evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\nSPECIAL WEATHER STATEMENT in Tay Township\nStrong winds with gusts of 70 to 90 km/h.\nThis evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nAlert type: STATEMENT\n\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
+      "kind": "statement",
+      "buttons_message_id": 16,
+      "buttons_chat_id": "-1003608973431",
+      "last_preview_sent_at": "2026-01-10T03:15:07Z"
+    }
+  },
   "approval_decisions": {
     "42f5cba59f": {
       "decision": "approved",
@@ -68,8 +79,8 @@
     "decided_at": "2026-01-05T19:01:12Z"
   },
   "test_gate_token": "bc8dcfa013",
-  "fb_last_posted_at": "2026-01-05T19:01:18.268848Z",
-  "fb_cooldown_until": "2026-01-05T20:01:18.268848Z",
+  "fb_last_posted_at": "2026-01-10T03:15:39.354925Z",
+  "fb_cooldown_until": "2026-01-10T04:15:39.354925Z",
   "telegram_last_remix_seen": {},
   "telegram_remix_count": {
     "9e9b11f786": 1
