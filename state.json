@@ -17,47 +17,7 @@
     "8cba3a1a17596318031764df06a0b1df5e042d7f": 1767610573
   },
   "global_last_post_ts": 1767639695,
-  "pending_approvals": {
-    "9d477bc408": {
-      "created_at": "2026-01-05T09:59:13Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding this afternoon.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 4:45a #TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding this afternoon.\n\nPlease take care, travel only if needed and check on neighbours who may need support.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 4:45a #TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
-      "kind": "warning",
-      "reminded_at": "2026-01-05T10:55:43Z",
-      "buttons_message_id": 63,
-      "buttons_chat_id": "-5222293769"
-    },
-    "464fd9d051": {
-      "created_at": "2026-01-05T14:56:50Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding by late morning or early afternoon.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 9:40a #TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding by late morning or early afternoon.\n\nPlease take care, travel only if needed and check on neighbours who may need support.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 9:40a #TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
-      "kind": "warning",
-      "reminded_at": "2026-01-05T15:52:15Z",
-      "buttons_message_id": 67,
-      "buttons_chat_id": "-5222293769"
-    },
-    "5d7e7e4795": {
-      "created_at": "2026-01-05T15:52:16Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding by late morning or early afternoon.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 10:39a #TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding by late morning or early afternoon.\n\nPlease take care, travel only if needed and check on neighbours who may need support.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 10:39a #TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
-      "kind": "warning",
-      "reminded_at": null,
-      "buttons_message_id": 72,
-      "buttons_chat_id": "-5222293769"
-    },
-    "babfb46834": {
-      "created_at": "2026-01-05T16:57:21Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding by late morning or early afternoon.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 10:56a #TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udd34 - YELLOW WARNING - SNOWFALL in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Reduced visibility at times in heavy snow.\nEnding by late morning or early afternoon.\n\nPlease take care, travel only if needed and check on neighbours who may need support.\n\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\nIssued Jan 5 10:56a #TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
-      "kind": "warning",
-      "reminded_at": null,
-      "buttons_message_id": 76,
-      "buttons_chat_id": "-5222293769"
-    },
-    "d1d34d2c8b": {
-      "created_at": "2026-01-10T00:21:14Z",
-      "preview_text": "\ud83e\uddea TEST MODE: Sample alert (NO POST)\n\n----- X (NO POST) -----\n\ud83d\udfe1 - Snowfall advisory in Tay Township\nStrong winds with gusts of 70 to 90 km/h.\nThis evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (NO POST) -----\n\ud83d\udfe1 - Snowfall advisory in Tay Township\nStrong winds with gusts of 70 to 90 km/h.\nThis evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nRUN_MODE: test_sample_alert_no_post\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n\nTOKEN: d1d34d2c8b",
-      "kind": "advisory",
-      "buttons_message_id": 95,
-      "buttons_chat_id": "-5222293769"
-    }
-  },
+  "pending_approvals": {},
   "approval_decisions": {
     "42f5cba59f": {
       "decision": "approved",
@@ -66,19 +26,51 @@
     "8a7345cd7a": {
       "decision": "approved",
       "decided_at": "2026-01-05T19:01:12Z"
+    },
+    "9d477bc408": {
+      "decision": "denied",
+      "decided_at": "2026-01-10T02:08:17Z",
+      "reason": "expired"
+    },
+    "464fd9d051": {
+      "decision": "denied",
+      "decided_at": "2026-01-10T02:08:17Z",
+      "reason": "expired"
+    },
+    "5d7e7e4795": {
+      "decision": "denied",
+      "decided_at": "2026-01-10T02:08:17Z",
+      "reason": "expired"
+    },
+    "babfb46834": {
+      "decision": "denied",
+      "decided_at": "2026-01-10T02:08:17Z",
+      "reason": "expired"
+    },
+    "d1d34d2c8b": {
+      "decision": "denied",
+      "decided_at": "2026-01-10T02:08:17Z",
+      "reason": "expired"
+    },
+    "9e9b11f786": {
+      "decision": "denied",
+      "decided_at": "2026-01-10T02:09:57Z"
     }
   },
-  "telegram_last_update_id": 259933343,
+  "telegram_last_update_id": 259933362,
   "telegram_last_signal": {
     "token": "8a7345cd7a",
     "decision": "approved",
     "decided_at": "2026-01-05T19:01:12Z"
   },
-  "test_gate_token": "d1d34d2c8b",
+  "test_gate_token": "9e9b11f786",
   "fb_last_posted_at": "2026-01-05T19:01:18.268848Z",
   "fb_cooldown_until": "2026-01-05T20:01:18.268848Z",
   "telegram_last_remix_seen": {},
-  "telegram_remix_count": {},
+  "telegram_remix_count": {
+    "9e9b11f786": 1
+  },
   "telegram_custom_pending": null,
-  "telegram_custom_text": {}
+  "telegram_custom_text": {},
+  "telegram_last_reminder_at": {}
 }
