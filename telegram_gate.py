@@ -415,47 +415,67 @@ def _send_preview_payload(preview_text: str, image_urls: Optional[List[str]]) ->
 # Gate wait helper (MAIN SCRIPT MUST CALL THIS)
 # ----------------------------
 def wait_for_decision(
-    load_state_fn: Callable[[], Dict[str, Any]],
-    save_state_fn: Callable[[Dict[str, Any]], None],
+    st,
     token: str,
-    ttl_min: Optional[int] = None,
-    poll_seconds: float = 2.0,
-) -> str:
+    save_state_fn,
+    ttl_min: int,
+    poll_seconds: int = 2,
+    max_wait_seconds: int | None = None,
+):
     """
-    Blocks until approved/denied or TTL expiry.
-    Returns: "approved" | "denied"
-    """
-    if ttl_min is None:
-        ttl_min = TELEGRAM_APPROVAL_TTL_MIN
+    Waits for Approve/Deny on a pending token.
 
-    # created_at comes from pending record
-    start = time.time()
+    - ttl_min is the “hard expiry” for the pending approval.
+    - max_wait_seconds optionally caps the wait time for THIS run (useful in Actions).
+      If provided, we stop waiting after max_wait_seconds even if ttl hasn’t expired.
+    """
+    import time
+    import datetime as dt
+
+    pending = (st.get("pending_approvals") or {}).get(token)
+    if not pending:
+        return "denied"  # nothing pending => treat as denied (safe default)
+
+    created_at = pending.get("created_at")
+    if created_at:
+        try:
+            created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except Exception:
+            created_dt = dt.datetime.now(dt.timezone.utc)
+    else:
+        created_dt = dt.datetime.now(dt.timezone.utc)
+
+    ttl_seconds = int(ttl_min) * 60
+    hard_deadline = created_dt + dt.timedelta(seconds=ttl_seconds)
+
+    # Soft deadline for *this run* (cap waiting time)
+    if max_wait_seconds is not None:
+        soft_deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(max_wait_seconds))
+    else:
+        soft_deadline = None
 
     while True:
-        st = load_state_fn()
-        _ensure_state_defaults(st)
-
-        # Always ingest latest button clicks / custom text
-        ingest_telegram_actions(st, save_state_fn)
-
-        d = decision_for(st, token)
-        if d in ("approved", "denied"):
-            return d
-
-        # If token no longer pending, treat as denied for safety
-        if not is_pending(st, token):
+        # refresh state each loop (important if another process writes state.json)
+        st = st if isinstance(st, dict) else {}
+        pending = (st.get("pending_approvals") or {}).get(token)
+        if not pending:
             return "denied"
 
-        # TTL expiry
-        elapsed = time.time() - start
-        if elapsed >= float(ttl_min) * 60.0:
-            mark_denied(st, token, reason="expired")
-            save_state_fn(st)
-            # Try to confirm expiry on the buttons message (optional)
-            _confirm_on_buttons_message(st, token, "🛑 Timed out — will NOT post.")
+        decision = (pending.get("decision") or "").strip().lower()
+        if decision in ("approved", "denied"):
+            return decision
+
+        now = dt.datetime.now(dt.timezone.utc)
+
+        # hard expiry (approval TTL)
+        if now >= hard_deadline:
             return "denied"
 
-        time.sleep(poll_seconds)
+        # soft expiry (don’t block Actions forever)
+        if soft_deadline and now >= soft_deadline:
+            return "denied"
+
+        time.sleep(max(1, int(poll_seconds)))
 
 # ----------------------------
 # Placeholder reminders
