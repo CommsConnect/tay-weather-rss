@@ -21,7 +21,12 @@
 # - Validates callbacks/messages come from the expected chat (when enforceable)
 # - Validates token format
 # - wait_for_decision can reload state from disk each poll (load_state_fn/state_path)
-
+#
+# HARDENING FOR TELEGRAM 400s
+# - sendMessage: chunks text to stay under 4096 chars
+# - sendMediaGroup: enforces caption <= 1024 chars + sends full text below
+# - optional URL preflight to avoid “wrong file identifier/http url specified”
+#
 from __future__ import annotations
 
 import os
@@ -29,7 +34,7 @@ import re
 import json
 import time
 import datetime as dt
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, Tuple
 
 import requests
 
@@ -37,9 +42,13 @@ import requests
 # Config
 # ---------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()  # numeric string or "@channel"
+TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID", "") or "").strip()
+
 TELEGRAM_APPROVAL_TTL_MIN = int(os.getenv("TELEGRAM_APPROVAL_TTL_MIN", "60"))
 TELEGRAM_REMIND_BEFORE_MIN = int(os.getenv("TELEGRAM_REMIND_BEFORE_MIN", "5"))
+
+# Optional: when sending media groups, verify URLs are reachable and look like images
+TELEGRAM_PREFLIGHT_MEDIA_URLS = os.getenv("TELEGRAM_PREFLIGHT_MEDIA_URLS", "true").strip().lower() == "true"
 
 # Optional security hardening:
 # Comma-separated Telegram numeric user IDs allowed to press buttons / send custom text
@@ -114,18 +123,176 @@ def _same_chat(chat_id_any: Any) -> bool:
         return str(chat_id_any) == str(TELEGRAM_CHAT_ID)
 
 
+def _raise_tg(r: requests.Response) -> None:
+    """
+    Raise a helpful error that includes Telegram's response body.
+    This is the #1 thing that makes debugging painless in Actions logs.
+    """
+    if not r.ok:
+        # Do NOT include secrets; response body is safe and extremely useful.
+        raise RuntimeError(f"Telegram API error {r.status_code}: {r.text}")
+
+
 def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Telegram hard limits:
+      - message text: 4096 chars
+    We chunk to avoid 400 Bad Request.
+
+    NOTE: reply_markup can only be attached to ONE message, so we attach it
+    to the LAST chunk.
+    """
     _require_config()
-    payload: Dict[str, Any] = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
-    if reply_markup is not None:
-        payload["reply_markup"] = reply_markup
-    r = requests.post(_tg_api("sendMessage"), json=payload, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    text = (text or "")
+
+    # Keep under Telegram's 4096 hard limit with some buffer.
+    max_len = 4000
+
+    chunks: List[str] = []
+    while text:
+        chunks.append(text[:max_len])
+        text = text[max_len:]
+
+    # If empty, still send one message (Telegram rejects missing text sometimes)
+    if not chunks:
+        chunks = [""]
+
+    last_json: Dict[str, Any] = {"ok": True, "result": None}
+
+    for i, chunk in enumerate(chunks):
+        payload: Dict[str, Any] = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": chunk,
+            "disable_web_page_preview": True,
+        }
+
+        # Only attach buttons on the final chunk
+        if reply_markup is not None and i == (len(chunks) - 1):
+            payload["reply_markup"] = reply_markup
+
+        r = requests.post(_tg_api("sendMessage"), json=payload, timeout=30)
+        _raise_tg(r)
+        last_json = r.json()
+
+    return last_json
+
+
+def _looks_like_image_url(url: str) -> bool:
+    """
+    Best-effort fast check (no downloads). Telegram must be able to fetch the URL.
+    """
+    url = (url or "").strip()
+    if not url:
+        return False
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return False
+
+    # Quick extension heuristic (not required, but helps)
+    lowered = url.lower().split("?")[0]
+    if any(lowered.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return True
+    return True  # still allow; many CDNs use extensionless URLs
+
+
+def _preflight_image_urls(image_urls: List[str]) -> Tuple[List[str], List[str]]:
+    """
+    Returns (good_urls, rejected_urls_with_reason)
+    This prevents Telegram sendMediaGroup 400s when a URL is not publicly reachable,
+    is HTML, or blocks bots (403/404/5xx).
+    """
+    good: List[str] = []
+    bad: List[str] = []
+
+    for url in (image_urls or []):
+        u = (url or "").strip()
+        if not _looks_like_image_url(u):
+            bad.append(f"{u} (not http/https)")
+            continue
+
+        try:
+            # HEAD first; if blocked, fall back to a tiny GET
+            r = requests.head(u, timeout=15, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code in (405, 403) or not r.ok:
+                # Some servers block HEAD or require GET.
+                r = requests.get(u, timeout=15, allow_redirects=True, stream=True, headers={"User-Agent": "Mozilla/5.0"})
+            if not r.ok:
+                bad.append(f"{u} (HTTP {r.status_code})")
+                continue
+
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype and not ctype.startswith("image/"):
+                # Telegram often rejects HTML pages / non-image responses as media URLs.
+                bad.append(f"{u} (content-type {ctype or 'unknown'})")
+                continue
+
+            good.append(u)
+        except Exception as e:
+            bad.append(f"{u} (error: {type(e).__name__})")
+
+    return good, bad
+
+
+def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, Any]:
+    """
+    Telegram hard limits:
+      - media caption (only first item): 1024 chars
+      - up to 10 photos
+
+    Strategy:
+      - If caption <= 1024: include it on the first photo
+      - If caption > 1024: send media group with a SHORT caption, then send
+        the full caption below via tg_send_message() (chunked).
+
+    Extra:
+      - Optional preflight: removes URLs that would cause Telegram 400s.
+    """
+    _require_config()
+
+    caption = (caption or "")
+
+    if not image_urls:
+        return tg_send_message(caption) if caption else {"ok": True, "result": None}
+
+    image_urls = image_urls[:10]
+
+    if TELEGRAM_PREFLIGHT_MEDIA_URLS:
+        good, bad = _preflight_image_urls(image_urls)
+        image_urls = good[:10]
+        if bad:
+            # This goes to logs + Telegram (best effort) but does not fail the run.
+            try:
+                tg_send_message("⚠️ Some image URLs were rejected and skipped:\n" + "\n".join(bad[:10]))
+            except Exception:
+                pass
+
+    # If everything got rejected, fall back to text only
+    if not image_urls:
+        return tg_send_message(caption) if caption else {"ok": True, "result": None}
+
+    CAPTION_LIMIT = 1024
+    overflow_text = ""
+
+    caption_for_media = caption
+    if len(caption) > CAPTION_LIMIT:
+        caption_for_media = caption[: CAPTION_LIMIT - 50].rstrip() + "\n\n(Full text sent below.)"
+        overflow_text = caption  # send full below after media group
+
+    media: List[Dict[str, Any]] = []
+    for i, url in enumerate(image_urls):
+        item: Dict[str, Any] = {"type": "photo", "media": url}
+        if i == 0 and caption_for_media:
+            item["caption"] = caption_for_media
+        media.append(item)
+
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "media": media}
+    r = requests.post(_tg_api("sendMediaGroup"), json=payload, timeout=30)
+    _raise_tg(r)
+    out = r.json()
+
+    if overflow_text:
+        tg_send_message(overflow_text)
+
+    return out
 
 
 def tg_edit_message_text(chat_id: str, message_id: int, text: str) -> None:
@@ -137,7 +304,7 @@ def tg_edit_message_text(chat_id: str, message_id: int, text: str) -> None:
         "disable_web_page_preview": True,
     }
     r = requests.post(_tg_api("editMessageText"), json=payload, timeout=30)
-    r.raise_for_status()
+    _raise_tg(r)
 
 
 def tg_edit_message_reply_markup(chat_id: str, message_id: int, reply_markup: Optional[Dict[str, Any]]) -> None:
@@ -148,7 +315,7 @@ def tg_edit_message_reply_markup(chat_id: str, message_id: int, reply_markup: Op
         "reply_markup": reply_markup if reply_markup is not None else {"inline_keyboard": []},
     }
     r = requests.post(_tg_api("editMessageReplyMarkup"), json=payload, timeout=30)
-    r.raise_for_status()
+    _raise_tg(r)
 
 
 def tg_answer_callback_query_safe(callback_query_id: str, text: str = "") -> None:
@@ -165,30 +332,7 @@ def tg_get_updates(offset: Optional[int]) -> Dict[str, Any]:
     if offset is not None:
         params["offset"] = offset
     r = requests.get(_tg_api("getUpdates"), params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-
-def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, Any]:
-    """
-    Sends up to 10 photos. Caption only applies to first item.
-    Returns Telegram JSON response (ok/result)
-    """
-    _require_config()
-    if not image_urls:
-        return tg_send_message(caption) if caption else {"ok": True, "result": None}
-
-    image_urls = image_urls[:10]
-    media = []
-    for i, url in enumerate(image_urls):
-        item = {"type": "photo", "media": url}
-        if i == 0 and caption:
-            item["caption"] = caption
-        media.append(item)
-
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "media": media}
-    r = requests.post(_tg_api("sendMediaGroup"), json=payload, timeout=30)
-    r.raise_for_status()
+    _raise_tg(r)
     return r.json()
 
 
@@ -585,8 +729,9 @@ def _send_preview_payload(preview_text: str, image_urls: Optional[List[str]]) ->
         else:
             tg_send_message(preview_text)
     except Exception:
+        # Fallback: never fail to send *something*
         try:
-            tg_send_message("Error sending media, sending text only.")
+            tg_send_message("⚠️ Error sending media, sending text only.")
         except Exception:
             pass
         tg_send_message(preview_text)
