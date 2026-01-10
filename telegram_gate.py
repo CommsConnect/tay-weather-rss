@@ -11,13 +11,15 @@
 #   It only records intent in state.json and provides helper functions.
 # - Main script must:
 #     * call ingest_telegram_actions(...)
+#     * call ensure_preview_sent(...)
 #     * call wait_for_decision(...) and respect denied
 #     * if remix/custom flags are present -> regenerate preview and call update_preview(...)
 #
 # SECURITY BEST PRACTICES INCLUDED
 # - Never logs secrets
 # - Optional allow-list of Telegram user IDs (TELEGRAM_ALLOWED_USER_IDS)
-# - Validates callbacks/messages come from the expected chat
+# - Validates callbacks/messages come from the expected chat (when enforceable)
+# - Validates token format
 # - wait_for_decision can reload state from disk each poll (load_state_fn/state_path)
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ import requests
 # Config
 # ---------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()  # can be numeric string or "@channel"
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()  # numeric string or "@channel"
 TELEGRAM_APPROVAL_TTL_MIN = int(os.getenv("TELEGRAM_APPROVAL_TTL_MIN", "60"))
 TELEGRAM_REMIND_BEFORE_MIN = int(os.getenv("TELEGRAM_REMIND_BEFORE_MIN", "5"))
 
@@ -59,8 +61,15 @@ if _ALLOWED:
 
 
 # ---------------------------------------------------------------------
-# Twitter length helper
+# Small helpers
 # ---------------------------------------------------------------------
+TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
+
+
+def _utc_now_z() -> str:
+    return dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
 def is_twitter_length_valid(text: str) -> bool:
     return len(text or "") <= 280
 
@@ -93,9 +102,9 @@ def _same_chat(chat_id_any: Any) -> bool:
     """
     Ensures the update belongs to the configured chat.
     TELEGRAM_CHAT_ID may be numeric (string) or '@channel'.
-    Updates usually give numeric chat_id.
-    If TELEGRAM_CHAT_ID is numeric, enforce exact match.
-    If TELEGRAM_CHAT_ID is '@channel', we cannot reliably compare numeric id here; allow.
+
+    Updates usually give numeric chat_id. If TELEGRAM_CHAT_ID is numeric, enforce exact match.
+    If TELEGRAM_CHAT_ID is '@channel', we can't imply numeric id here reliably => allow.
     """
     if not TELEGRAM_CHAT_ID:
         return False
@@ -188,13 +197,6 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
 # ---------------------------------------------------------------------
 # State helpers
 # ---------------------------------------------------------------------
-TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
-
-
-def _utc_now_z() -> str:
-    return dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
-
-
 def _ensure_state_defaults(state: Dict[str, Any]) -> None:
     state.setdefault("pending_approvals", {})          # token -> record
     state.setdefault("approval_decisions", {})         # token -> {decision, decided_at, ...}
@@ -262,48 +264,6 @@ def decision_for(state: Dict[str, Any], token: str) -> Optional[str]:
     return None
 
 
-def is_pending(state: Dict[str, Any], token: str) -> bool:
-    _ensure_state_defaults(state)
-    return token in (state.get("pending_approvals") or {})
-
-
-def is_expired(state: Dict[str, Any], token: str, ttl_min: Optional[int] = None) -> bool:
-    """
-    Returns True if the pending approval token is older than ttl_min minutes.
-
-    Uses pending_approvals[token]["created_at"] (ISO string with trailing Z).
-    If created_at is missing or unparseable, returns False (fail-open on expiry check).
-    """
-    _ensure_state_defaults(state)
-    if ttl_min is None:
-        ttl_min = TELEGRAM_APPROVAL_TTL_MIN
-
-    rec = (state.get("pending_approvals") or {}).get(token) or {}
-    created_at = (rec.get("created_at") or "").strip()
-    if not created_at:
-        return False
-
-    try:
-        created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-        if created_dt.tzinfo is None:
-            created_dt = created_dt.replace(tzinfo=dt.timezone.utc)
-        now = dt.datetime.now(dt.timezone.utc)
-        age_sec = (now - created_dt).total_seconds()
-        return age_sec >= float(ttl_min) * 60.0
-    except Exception:
-        return False
-
-
-def mark_denied(state: Dict[str, Any], token: str, reason: str = "expired") -> None:
-    _ensure_state_defaults(state)
-    state["approval_decisions"][token] = {
-        "decision": "denied",
-        "decided_at": _utc_now_z(),
-        "reason": reason,
-    }
-    state["pending_approvals"].pop(token, None)
-
-
 def remix_count_for(state: Dict[str, Any], token: str) -> int:
     _ensure_state_defaults(state)
     return int((state.get("telegram_remix_count") or {}).get(token) or 0)
@@ -320,6 +280,16 @@ def clear_custom_text(state: Dict[str, Any], token: str) -> None:
     pc = state.get("telegram_custom_pending")
     if pc and pc.get("token") == token:
         state["telegram_custom_pending"] = None
+
+
+def mark_denied(state: Dict[str, Any], token: str, reason: str = "expired") -> None:
+    _ensure_state_defaults(state)
+    state["approval_decisions"][token] = {
+        "decision": "denied",
+        "decided_at": _utc_now_z(),
+        "reason": reason,
+    }
+    state["pending_approvals"].pop(token, None)
 
 
 # ---------------------------------------------------------------------
@@ -557,6 +527,9 @@ def update_preview(
     Buttons remain the same token.
     """
     _ensure_state_defaults(state)
+    token = (token or "").strip()
+    if not TOKEN_RE.match(token):
+        return
     if token not in (state.get("pending_approvals") or {}):
         return
 
@@ -594,6 +567,7 @@ def wait_for_decision(
     poll_interval_seconds: Optional[int] = None,   # alias supported (older callers)
     load_state_fn: Optional[Callable[[], Dict[str, Any]]] = None,  # BEST: reload from disk each poll
     state_path: Optional[str] = None,              # alternative: reload from JSON path each poll
+    ingest_each_poll: bool = False,                # optional: call ingest_telegram_actions each poll (needs save_state_fn)
     **kwargs,                                      # swallow unexpected args safely
 ) -> str:
     """
@@ -602,14 +576,15 @@ def wait_for_decision(
     Compatibility:
     - Accepts poll_interval_seconds (some callers use this name).
     - Accepts extra kwargs without crashing (future-proof).
-    - Backward compatible with callers passing a static `st`.
 
     IMPORTANT:
-    - If you want this to *actually see* Telegram decisions, you MUST provide
-      either load_state_fn or state_path (so it can reload state each poll).
-      Otherwise it will only see changes in the in-memory dict.
+    - If you want this to *actually see* Telegram decisions, provide either:
+        * load_state_fn, OR
+        * state_path
+      so it can reload state each poll.
+    - Optionally set ingest_each_poll=True to process new button clicks while waiting
+      (useful in Actions where no other loop is running).
     """
-    # If caller provided poll_interval_seconds, use it
     if poll_interval_seconds is not None:
         poll_seconds = int(poll_interval_seconds)
 
@@ -617,7 +592,6 @@ def wait_for_decision(
     if not TOKEN_RE.match(token):
         return "denied"
 
-    # Create a reloader
     def _reload() -> Dict[str, Any]:
         if load_state_fn is not None:
             try:
@@ -637,7 +611,9 @@ def wait_for_decision(
 
     pending = (st_local.get("pending_approvals") or {}).get(token)
     if not pending:
-        return "denied"  # nothing pending => safe default
+        # maybe already decided
+        d = decision_for(st_local, token)
+        return d if d in ("approved", "denied") else "denied"
 
     created_at = pending.get("created_at") or ""
     try:
@@ -654,24 +630,31 @@ def wait_for_decision(
         soft_deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(max_wait_seconds))
 
     while True:
+        # optional: process new updates while we wait
+        if ingest_each_poll and save_state_fn is not None:
+            try:
+                tmp = _reload()
+                ingest_telegram_actions(tmp, save_state_fn)
+            except Exception:
+                pass
+
         st_local = _reload()
         _ensure_state_defaults(st_local)
-
-        # If it disappeared, treat as denied (safe)
-        pending = (st_local.get("pending_approvals") or {}).get(token)
-        if not pending:
-            # It may have been moved into approval_decisions by ingest_telegram_actions
-            d = decision_for(st_local, token)
-            return d if d in ("approved", "denied") else "denied"
 
         # Prefer explicit decisions map (set by ingest_telegram_actions)
         d = decision_for(st_local, token)
         if d in ("approved", "denied"):
             return d
 
+        # If it disappeared, treat as denied (safe)
+        pending = (st_local.get("pending_approvals") or {}).get(token)
+        if not pending:
+            d2 = decision_for(st_local, token)
+            return d2 if d2 in ("approved", "denied") else "denied"
+
         now = dt.datetime.now(dt.timezone.utc)
+
         if now >= hard_deadline:
-            # Optionally record expiry for auditing
             try:
                 mark_denied(st_local, token, reason="expired")
                 if save_state_fn:
@@ -692,6 +675,7 @@ def wait_for_decision(
 def maybe_send_reminders(state: Dict[str, Any], save_state_fn: Callable[[Dict[str, Any]], None]) -> None:
     """
     Sends a single reminder per token when it's close to expiring.
+    Also marks expired tokens denied (safe default).
     """
     if not _config_ok():
         return
@@ -702,8 +686,8 @@ def maybe_send_reminders(state: Dict[str, Any], save_state_fn: Callable[[Dict[st
     remind_before_min = max(1, TELEGRAM_REMIND_BEFORE_MIN)
 
     now = dt.datetime.now(dt.timezone.utc)
-
     changed = False
+
     for token, rec in list((state.get("pending_approvals") or {}).items()):
         created_at = (rec.get("created_at") or "").strip()
         if not created_at:
@@ -719,13 +703,13 @@ def maybe_send_reminders(state: Dict[str, Any], save_state_fn: Callable[[Dict[st
         hard_deadline = created_dt + dt.timedelta(minutes=int(ttl_min))
         remind_at = hard_deadline - dt.timedelta(minutes=int(remind_before_min))
 
-        if now < remind_at:
-            continue
-
-        # already expired? mark denied (safe) and stop
+        # expired -> deny
         if now >= hard_deadline:
             mark_denied(state, token, reason="expired")
             changed = True
+            continue
+
+        if now < remind_at:
             continue
 
         # one reminder per token
