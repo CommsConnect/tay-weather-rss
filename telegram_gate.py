@@ -188,6 +188,33 @@ def is_pending(state: Dict[str, Any], token: str) -> bool:
     _ensure_state_defaults(state)
     return token in (state.get("pending_approvals") or {})
 
+def is_expired(state: Dict[str, Any], token: str, ttl_min: Optional[int] = None) -> bool:
+    """
+    Returns True if the pending approval token is older than ttl_min minutes.
+
+    Uses pending_approvals[token]["created_at"] (ISO string with trailing Z).
+    If created_at is missing or unparseable, returns False (fail-open on expiry check).
+    """
+    _ensure_state_defaults(state)
+
+    if ttl_min is None:
+        ttl_min = TELEGRAM_APPROVAL_TTL_MIN
+
+    rec = (state.get("pending_approvals") or {}).get(token) or {}
+    created_at = (rec.get("created_at") or "").strip()
+    if not created_at:
+        return False
+
+    try:
+        created_dt = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=dt.timezone.utc)
+        now = dt.datetime.now(dt.timezone.utc)
+        age_sec = (now - created_dt).total_seconds()
+        return age_sec >= float(ttl_min) * 60.0
+    except Exception:
+        return False
+
 def mark_denied(state: Dict[str, Any], token: str, reason: str = "expired") -> None:
     _ensure_state_defaults(state)
     state["approval_decisions"][token] = {
