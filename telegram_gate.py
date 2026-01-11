@@ -1,8 +1,8 @@
 # telegram_gate.py
 #
 # Telegram approve/deny gate + remix/custom controls
-# - ✅ Approve: records approved + edits buttons message to confirm
-# - 🛑 Deny: records denied + edits buttons message to confirm "will NOT post"
+# - ✅ Approve: records approved + CONFIRMS in Telegram (toast + edit + fallback message)
+# - 🛑 Deny: records denied + CONFIRMS in Telegram (toast + edit + fallback message)
 # - 🔁 Remix: increments a counter (main script should regenerate care statement + preview)
 # - ✏️ Custom: collects custom text via chat, stores it, and signals main to regenerate preview
 #
@@ -22,7 +22,12 @@
 # - Validates token format
 # - Auto-heals Telegram group -> supergroup migrations (updates chat_id runtime + retries once)
 # - wait_for_decision can reload state from disk each poll (load_state_fn/state_path)
-
+#
+# CONFIRMATION RELIABILITY (fixes “no confirmation message”)
+# - ALWAYS calls answerCallbackQuery (toast) on button press
+# - Tries to edit the buttons message to confirm + remove buttons
+# - If edit fails for any reason, sends a standalone confirmation message as fallback
+#
 from __future__ import annotations
 
 import os
@@ -294,10 +299,36 @@ def tg_edit_message_reply_markup(chat_id: str, message_id: int, reply_markup: Op
     _raise_tg(r)
 
 
+def tg_answer_callback_query(callback_query_id: str, text: str = "", show_alert: bool = False) -> None:
+    """
+    Properly ACK the inline button press.
+    This is the key piece that makes Telegram feel responsive.
+    """
+    _require_config()
+    payload = {
+        "callback_query_id": callback_query_id,
+        "text": (text or "")[:200],
+        "show_alert": bool(show_alert),
+    }
+    r = _tg_request("answerCallbackQuery", json_payload=payload, timeout=30)
+    # Do not hard-fail the whole run if ack fails, but do raise if Telegram is misconfigured
+    if not r.ok:
+        # soft failure
+        return
+    # Telegram can return 200 with ok=false for some errors; keep it soft
+    try:
+        j = r.json()
+        if not j.get("ok"):
+            return
+    except Exception:
+        return
+
+
 def tg_answer_callback_query_safe(callback_query_id: str, text: str = "") -> None:
     try:
-        payload = {"callback_query_id": callback_query_id, "text": text}
-        _ = _tg_request("answerCallbackQuery", json_payload=payload, timeout=30)
+        if not _config_ok():
+            return
+        tg_answer_callback_query(callback_query_id, text=text)
     except Exception:
         pass
 
@@ -351,23 +382,47 @@ def _disable_buttons(state: Dict[str, Any], token: str) -> None:
             pass
 
 
-def _confirm_on_buttons_message(state: Dict[str, Any], token: str, line: str) -> None:
+def _confirm_action(
+    *,
+    state: Dict[str, Any],
+    token: str,
+    line: str,
+    cb_id: Optional[str] = None,
+    toast: str = "✅ Recorded",
+) -> None:
     """
-    Edits the buttons message text to show final confirmation and removes buttons.
+    Reliable confirmation strategy:
+      1) answerCallbackQuery (toast) if we have cb_id
+      2) Try to edit the buttons message text + remove buttons
+      3) If edit fails, send a new message fallback
     """
+    if cb_id:
+        tg_answer_callback_query_safe(cb_id, text=toast)
+
     rec = (state.get("pending_approvals") or {}).get(token) or {}
-    chat_id = rec.get("buttons_chat_id")
+    chat_id = rec.get("buttons_chat_id") or TELEGRAM_CHAT_ID
     msg_id = rec.get("buttons_message_id")
-    if not (chat_id and msg_id):
-        return
 
     new_text = f"TOKEN: {token}\n{line}"
-    try:
-        tg_edit_message_text(str(chat_id), int(msg_id), new_text)
-    except Exception:
-        pass
 
-    _disable_buttons(state, token)
+    edited_ok = False
+    if chat_id and msg_id:
+        try:
+            tg_edit_message_text(str(chat_id), int(msg_id), new_text)
+            try:
+                tg_edit_message_reply_markup(str(chat_id), int(msg_id), {"inline_keyboard": []})
+            except Exception:
+                pass
+            edited_ok = True
+        except Exception:
+            edited_ok = False
+
+    if not edited_ok:
+        # Fallback: always send a standalone confirmation message
+        try:
+            tg_send_message(new_text)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------
@@ -456,6 +511,11 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
     SECURITY:
     - Ignores updates not from TELEGRAM_CHAT_ID (where enforceable)
     - Optional allow-list via TELEGRAM_ALLOWED_USER_IDS
+
+    CONFIRMATION:
+    - ACKs inline button presses (answerCallbackQuery)
+    - Confirms via editMessage + removes buttons
+    - Falls back to sendMessage if edit fails
     """
     if not _config_ok():
         return
@@ -478,7 +538,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
         # 1) BUTTON CLICKS
         cb = upd.get("callback_query")
         if cb:
-            cb_id = cb.get("id", "")
+            cb_id = (cb.get("id") or "").strip()
             cb_data = (cb.get("data") or "").strip()
 
             from_user_id = (cb.get("from") or {}).get("id")
@@ -496,6 +556,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 continue
 
             if ":" not in cb_data:
+                tg_answer_callback_query_safe(cb_id, text="Invalid action.")
                 continue
 
             action, token = cb_data.split(":", 1)
@@ -506,32 +567,56 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 tg_answer_callback_query_safe(cb_id, text="Invalid token.")
                 continue
 
+            # If token not pending anymore, still ACK so Telegram UI doesn’t feel broken
+            # (e.g., someone clicks after it was already decided)
+            if token not in (state.get("pending_approvals") or {}) and action in ("go", "no"):
+                tg_answer_callback_query_safe(cb_id, text="Already decided.")
+                continue
+
             if action == "go":
                 state["approval_decisions"][token] = {"decision": "approved", "decided_at": _utc_now_z()}
-                tg_answer_callback_query_safe(cb_id, text="Approved ✅")
-                _confirm_on_buttons_message(state, token, "✅ Approved — will post.")
+                _confirm_action(
+                    state=state,
+                    token=token,
+                    line="✅ Approved — will post.",
+                    cb_id=cb_id,
+                    toast="Approved ✅",
+                )
                 state["pending_approvals"].pop(token, None)
                 changed = True
 
             elif action == "no":
                 state["approval_decisions"][token] = {"decision": "denied", "decided_at": _utc_now_z()}
-                tg_answer_callback_query_safe(cb_id, text="Denied 🛑")
-                _confirm_on_buttons_message(state, token, "🛑 Denied — will NOT post.")
+                _confirm_action(
+                    state=state,
+                    token=token,
+                    line="🛑 Denied — will NOT post.",
+                    cb_id=cb_id,
+                    toast="Denied 🛑",
+                )
                 state["pending_approvals"].pop(token, None)
                 changed = True
 
             elif action == "remix":
                 state["telegram_remix_count"][token] = remix_count_for(state, token) + 1
-                tg_answer_callback_query_safe(cb_id, text="Remixing 🔁")
-                try:
-                    tg_send_message("🔁 Remix requested. I’ll generate a new Care Statement + send a new preview.")
-                except Exception:
-                    pass
+                _confirm_action(
+                    state=state,
+                    token=token,
+                    line="🔁 Remix requested — regenerating preview.",
+                    cb_id=cb_id,
+                    toast="Remixing 🔁",
+                )
                 changed = True
 
             elif action == "custom":
                 state["telegram_custom_pending"] = {"token": token, "mode": "x", "created_at": _utc_now_z()}
-                tg_answer_callback_query_safe(cb_id, text="Custom text mode ✏️")
+                _confirm_action(
+                    state=state,
+                    token=token,
+                    line="✏️ Custom text mode enabled — send X text in chat.",
+                    cb_id=cb_id,
+                    toast="Custom ✏️",
+                )
                 try:
                     tg_send_message(
                         "✏️ Custom Text:\n"
@@ -544,6 +629,8 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                     pass
                 changed = True
 
+            else:
+                tg_answer_callback_query_safe(cb_id, text="Unknown action.")
             continue
 
         # 2) CUSTOM TEXT CHAT INPUT
@@ -708,7 +795,10 @@ def _send_preview_payload(preview_text: str, image_urls: Optional[List[str]]) ->
             tg_send_message("Error sending media, sending text only.")
         except Exception:
             pass
-        tg_send_message(preview_text)
+        try:
+            tg_send_message(preview_text)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------
