@@ -205,6 +205,23 @@ def safe_int(x: Any, default: int) -> int:
 def text_hash(s: str) -> str:
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
 
+# ---------------------------------------------------------------------
+# ENDED / ALL-CLEAR detection (keeps core logic intact)
+# ---------------------------------------------------------------------
+_ENDED_PHRASES = (
+    " no longer in effect",
+    " is no longer in effect",
+    " has ended",
+    " ended",
+)
+
+def is_alert_ended(title: str, summary: str) -> bool:
+    """
+    Returns True when Environment Canada issues an 'ended' / 'no longer in effect' entry.
+    This does NOT change warning/watch/advisory wording. It's just a state detector.
+    """
+    t = f"{title or ''} {summary or ''}".lower()
+    return any(p in t for p in _ENDED_PHRASES)
 
 # =============================================================================
 # Severity emoji (match Environment Canada alert colours)
