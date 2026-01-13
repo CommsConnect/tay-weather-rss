@@ -1298,7 +1298,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     """
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
-    sev = severity_emoji(title_raw)
+    sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
 
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
@@ -1347,7 +1347,7 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     title_raw = atom_title_for_tay((entry.get("title") or "").strip())
     official = (entry.get("link") or "").strip()
 
-    sev = severity_emoji(title_raw)
+    sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
     title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
@@ -1532,6 +1532,8 @@ def main() -> None:
             image_urls=test_images,
         )
 
+        # (Optional) one last ingest right before reading decision
+        ingest_telegram_actions(st, save_state)
         d = decision_for(st, token)
         if d not in ("approved", "denied"):
             d = wait_for_decision_safe(st, token)
@@ -1597,6 +1599,8 @@ def main() -> None:
 
             ensure_preview_sent(st, save_state, token, preview_text, kind="other", image_urls=test_images)
 
+            # (Optional) one last ingest right before reading decision
+            ingest_telegram_actions(st, save_state)
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
                 d = wait_for_decision_safe(st, token)
@@ -1675,19 +1679,20 @@ def main() -> None:
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
-        inactive_markers = (
-            "ended",
-            "has ended",
-            "cancelled",
-            "no longer in effect",
-            "is no longer in effect",
-            "terminated",
-            "rescinded",
+        # ---------------------------------------------------------
+        # ENDED / non-active detection
+        # - We DO want to post "ended / no longer in effect" as an all-clear (🟢).
+        # - We DO NOT want to post general bulletin items like "no alerts in effect".
+        # ---------------------------------------------------------
+        ended = is_alert_ended(title, entry.get("summary") or "")
+
+        general_non_alert_markers = (
             "no alerts in effect",
             "no watches or warnings in effect",
         )
-        if any(m in title_l for m in inactive_markers) or any(m in summary_l for m in inactive_markers):
-            print(f"Info: non-active item — skipping social post: {title}")
+
+        if any(m in title_l for m in general_non_alert_markers) or any(m in summary_l for m in general_non_alert_markers):
+            print(f"Info: general bulletin — skipping social post: {title}")
             posted.add(guid)
             continue
 
@@ -1716,7 +1721,10 @@ def main() -> None:
         care = ""
         if care_rows:
             try:
-                care = pick_care_statement(care_rows, sev, type_label)
+                # ENDED cares come from 🟢 rows in the sheet
+                care_severity = "🟢" if ended else sev
+                care = pick_care_statement(care_rows, care_severity, type_label)
+
                 if care:
                     print(f"CareStatements: matched ({sev} / {type_label})")
                 else:
@@ -1744,7 +1752,7 @@ def main() -> None:
             continue
 
         # ---------------------------------------------------------
-        # Telegram gate preview / policy
+        # Telegram gate preview / policy  ✅ (ready-to-paste block)
         # ---------------------------------------------------------
         if TELEGRAM_ENABLE_GATE:
             token = hashlib.sha1(guid.encode("utf-8")).hexdigest()[:10]
@@ -1753,7 +1761,7 @@ def main() -> None:
             maybe_send_reminders(state, save_state)
 
             preview_text = (
-                f"🚨 {title}\n\n"
+                f"{'🟢' if ended else '🚨'} {title}\n\n"
                 f"----- X (will post) -----\n{x_text}\n\n"
                 f"----- Facebook (will post) -----\n{fb_text}\n\n"
                 f"Alert type: {alert_kind.upper()}\n\n"
@@ -1762,39 +1770,9 @@ def main() -> None:
 
             ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind, image_urls=image_refs)
 
-            # Decision rules:
-            # - WARNING: denied => no post; approved => post; else auto-post after delay unless denied.
-            # - OTHER: must be approved (wait up to TELEGRAM_WAIT_SECONDS); timeout => denied.
-            d = decision_for(state, token)
-
-            if alert_kind == "warning":
-                if d == "denied":
-                    print(f"🛑 Telegram denied for WARNING token={token}. Skipping.")
-                    continue
-                if d != "approved":
-                    if not warning_delay_elapsed(state, token):
-                        print(f"⏳ WARNING waiting for delay window (token={token}). Not posting this run.")
-                        continue
-
-                    ingest_telegram_actions(state, save_state)
-                    d2 = decision_for(state, token)
-                    if d2 == "denied":
-                        print(f"🛑 Telegram denied during delay window (token={token}). Skipping.")
-                        continue
-
-                    print(f"✅ WARNING delay elapsed and not denied (token={token}). Proceeding to post.")
-                else:
-                    print(f"✅ Telegram approved for WARNING token={token}. Proceeding to post.")
-
-            else:
-                if d not in ("approved", "denied"):
-                    d = wait_for_decision_safe(state, token)
-
-                if d != "approved":
-                    print(f"🛑 Telegram not approved for token={token} (d={d}). Skipping.")
-                    continue
-
             # --- Handle Remix / Custom requests (rebuild preview when requested) ---
+            # IMPORTANT: this must run BEFORE any decision-rule `continue`,
+            # otherwise Remix/Custom won't update the preview while waiting.
             custom = custom_text_for(state, token) or {}
             current_remix = remix_count_for(state, token)
             last_seen = int((state.get("telegram_last_remix_seen") or {}).get(token, 0))
@@ -1806,11 +1784,13 @@ def main() -> None:
 
             if needs_refresh:
                 care2 = care
+                care_colour_for_sheet = "🟢" if ended else sev
+
                 if care_rows and (current_remix != last_seen):
                     try:
                         care2 = pick_remixed_care_text(
                             care_rows=care_rows,
-                            colour=sev,
+                            colour=care_colour_for_sheet,
                             alert_type=type_label,
                             current_care_text=care,
                             remix_count=current_remix,
@@ -1830,14 +1810,13 @@ def main() -> None:
                 fb_text = fb_text2
 
                 refreshed_preview = (
-                    f"🚨 {title}\n\n"
+                    f"{'🟢' if ended else '🚨'} {title}\n\n"
                     f"----- X (will post) -----\n{x_text}\n\n"
                     f"----- Facebook (will post) -----\n{fb_text}\n\n"
                     f"Alert type: {alert_kind.upper()}\n\n"
                     f"More:\n{more_url}"
                 )
 
-                # ✅ Properly refresh the preview tied to this token
                 try:
                     update_preview(state, save_state, token, refreshed_preview, image_urls=image_refs)
                 except Exception:
@@ -1846,7 +1825,7 @@ def main() -> None:
                     except Exception:
                         pass
 
-                # Recommended: clear custom text once applied so it doesn’t re-apply forever
+                # Clear custom text once applied so it doesn’t re-apply forever
                 try:
                     clear_custom_text(state, token)
                 except Exception:
@@ -1856,29 +1835,154 @@ def main() -> None:
                 state["telegram_last_remix_seen"][token] = int(current_remix)
                 save_state(state)
 
-        # Recompute hash after any Telegram refresh
-        h = text_hash(x_text)
-        if h in posted_text_hashes:
-            print("Social skipped: duplicate text hash already posted (after refresh)")
-            posted.add(guid)
+                # ✅ catch fast follow-up clicks (Approve/Deny) right after refresh
+                ingest_telegram_actions(state, save_state)
+
+            # Decision rules:
+            # - WARNING: denied => no post; approved => post; else auto-post after delay unless denied.
+            # - OTHER: must be approved (wait up to TELEGRAM_WAIT_SECONDS); timeout => denied.
+            # (Optional) one last ingest right before reading decision
+            ingest_telegram_actions(state, save_state)
+            d = decision_for(state, token)
+
+            if alert_kind == "warning":
+                # Denied = hard stop
+                if d == "denied":
+                    print(f"🛑 Telegram denied for WARNING token={token}. Skipping.")
+                    try:
+                        tg_send_message(f"🛑 DENIED — will NOT post.\nTOKEN: {token}")
+                    except Exception:
+                        pass
+                    continue
+
+                # Approved = post immediately
+                if d == "approved":
+                    print(f"✅ Telegram approved for WARNING token={token}. Proceeding to post.")
+                    try:
+                        tg_send_message(f"✅ APPROVED — proceeding to post now.\nTOKEN: {token}")
+                    except Exception:
+                        pass
+                else:
+                    # Pending: wait until delay window elapses, then auto-post unless denied
+                    if not warning_delay_elapsed(state, token):
+                        print(f"⏳ WARNING waiting for delay window (token={token}). Not posting this run.")
+                        # We intentionally DO NOT post yet. Preview can still be refreshed on later runs.
+                        continue
+
+                    # Delay elapsed — ingest latest Telegram actions and re-check for denial
+                    ingest_telegram_actions(state, save_state)
+                    d2 = decision_for(state, token)
+                    if d2 == "denied":
+                        print(f"🛑 Telegram denied during delay window (token={token}). Skipping.")
+                        try:
+                            tg_send_message(f"🛑 DENIED — will NOT post.\nTOKEN: {token}")
+                        except Exception:
+                            pass
+                        continue
+
+                    print(f"✅ WARNING delay elapsed and not denied (token={token}). Proceeding to post.")
+                    try:
+                        tg_send_message(f"✅ Proceeding to post (WARNING delay elapsed; not denied).\nTOKEN: {token}")
+                    except Exception:
+                        pass
+
+            else:
+                # Non-warning alerts must be explicitly approved
+                if d not in ("approved", "denied"):
+                    d = wait_for_decision_safe(state, token)
+
+                if d != "approved":
+                    print(f"🛑 Telegram not approved for token={token} (d={d}). Skipping.")
+                    try:
+                        tg_send_message(f"🛑 NOT APPROVED — will NOT post.\nDecision: {d}\nTOKEN: {token}")
+                    except Exception:
+                        pass
+                    continue
+
+                print(f"✅ Telegram approved for token={token}. Proceeding to post.")
+                try:
+                    tg_send_message(f"✅ APPROVED — proceeding to post now.\nTOKEN: {token}")
+                except Exception:
+                    pass
+
+        else:
+            print("Telegram gate disabled — skipping social post (safe default).")
             continue
 
         # ---------------------------------------------------------
-        # Post now
+        # Post now (capture outcomes + confirm to Telegram)
         # ---------------------------------------------------------
         posted_this = False
+        x_ok = False
+        fb_ok = False
+        x_err = ""
+        fb_err = ""
 
+        # --- X ---
         if EFFECTIVE_ENABLE_X_POSTING:
-            safe_post_to_x(x_text, image_refs=image_refs)
-            posted_this = True
+            try:
+                safe_post_to_x(x_text, image_refs=image_refs)
+                x_ok = True
+                posted_this = True
+            except Exception as e:
+                msg = str(e)
+                if "X_DUPLICATE_TWEET" in msg:
+                    x_ok = True
+                    posted_this = True
+                    print("ℹ️ X duplicate detected — treating as already posted.")
+                else:
+                    x_err = msg
+                    print(f"⚠️ X post failed: {e}")
 
+        else:
+            print("X posting skipped (disabled or run mode).")
+
+        # --- Facebook ---
         if EFFECTIVE_ENABLE_FB_POSTING:
             fb_images = materialize_images_for_facebook(image_refs)
             try:
-                safe_post_to_facebook(state, caption=fb_text, image_urls=fb_images)
-                posted_this = True
+                try:
+                    safe_post_to_facebook(state, caption=fb_text, image_urls=fb_images)
+                    fb_ok = True
+                    posted_this = True
+                except Exception as e:
+                    fb_err = str(e)
+                    print(f"⚠️ Facebook post failed: {e}")
             finally:
                 cleanup_tmp_media_files(fb_images)
+        else:
+            print("Facebook posting skipped (disabled or run mode).")
+
+        # --- Telegram: confirm outcome ---
+        if TELEGRAM_ENABLE_GATE:
+            try:
+                lines = []
+                lines.append("✅ APPROVED — posting complete")
+                lines.append(f"🟢 ENDED: {'yes' if ended else 'no'}")
+                lines.append(f"TOKEN: {token}")
+
+                if EFFECTIVE_ENABLE_X_POSTING:
+                    lines.append(f"X: {'✅ posted' if x_ok else '❌ failed'}")
+                    if x_err and not x_ok:
+                        lines.append(f"X error: {x_err[:140]}")
+                else:
+                    lines.append("X: ⏭️ skipped")
+
+                if EFFECTIVE_ENABLE_FB_POSTING:
+                    lines.append(f"Facebook: {'✅ posted' if fb_ok else '❌ failed'}")
+                    if fb_err and not fb_ok:
+                        lines.append(f"FB error: {fb_err[:140]}")
+                else:
+                    lines.append("Facebook: ⏭️ skipped")
+
+                if posted_this:
+                    lines.append("✅ Success.")
+                else:
+                    lines.append("⚠️ Nothing posted (all platforms skipped or failed).")
+
+                tg_send_message("\n".join(lines))
+            except Exception as e:
+                print(f"⚠️ Telegram post-confirmation failed: {e}")
 
         # ---------------------------------------------------------
         # Update state
