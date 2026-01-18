@@ -6,7 +6,10 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW ADVISORY - BLOWING SNOW (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404</guid><pubDate>Sun, 18 Jan 2026 21:44:04 +0000</pubDate><description>YELLOW ADVISORY - BLOWING SNOW (Tay Township area)
+<item><title>YELLOW WATCH - SNOW SQUALL (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107</guid><pubDate>Sun, 18 Jan 2026 23:01:07 +0000</pubDate><description>YELLOW WATCH - SNOW SQUALL (Tay Township area)
+Issued: 6:01 PM EST Sunday 18 January 2026
+More info (Tay Township): https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - BLOWING SNOW (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404</guid><pubDate>Sun, 18 Jan 2026 21:44:04 +0000</pubDate><description>YELLOW ADVISORY - BLOWING SNOW (Tay Township area)
 Issued: 4:44 PM EST Sunday 18 January 2026
 More info (Tay Township): https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434</guid><pubDate>Sun, 11 Jan 2026 13:24:34 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
@@ -125,13 +128,6 @@ Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</des
 <guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231182159</guid>
 <pubDate>Wed, 31 Dec 2025 18:21:59 +0000</pubDate>
 <description>ORANGE WARNING - SNOW SQUALL (Tay Township area) Issued: 1:21 PM EST Wednesday 31 December 2025 More info (Tay Township): https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description>
-</item>
-<item>
-<title>ORANGE WARNING - SNOW SQUALL (Tay Township area)</title>
-<link>https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768</link>
-<guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20251231095952</guid>
-<pubDate>Wed, 31 Dec 2025 09:59:52 +0000</pubDate>
-<description>ORANGE WARNING - SNOW SQUALL (Tay Township area) Issued: 4:59 AM EST Wednesday 31 December 2025 More info (Tay Township): https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description>
 </item>
 </channel>
 </rss>

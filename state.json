@@ -1,42 +1,45 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:20260111171610",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
-    "tag:weather.gc.ca,2013-04-16:20260110044541",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
+    "tag:weather.gc.ca,2013-04-16:20260110044538",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:20260111171610",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111160037",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
-    "tag:weather.gc.ca,2013-04-16:20260110044538",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025"
+    "tag:weather.gc.ca,2013-04-16:20260110044541",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745"
   ],
   "posted_text_hashes": [
     "6f927e08253fe620675bc55235d81cfdd8df3b7f",
-    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
-    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
     "788b264da1732b8d7f5e6869a5de1afd50b85290",
+    "f71a5677714392db9bd32279a6b53c325f433d70",
     "4c571d6d3ab8580986056227ad51f29a2fa89d0a",
-    "bf16ef8b61268a9d095993aaf41529dfd6cfab7e"
+    "bf16ef8b61268a9d095993aaf41529dfd6cfab7e",
+    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
+    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20"
   ],
   "cooldowns": {
     "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768139486,
     "8cba3a1a17596318031764df06a0b1df5e042d7f": 1767610573,
-    "ff0a63ffc349e53f3fb9c78829f24316ddbb29d5": 1768774873
+    "ff0a63ffc349e53f3fb9c78829f24316ddbb29d5": 1768774873,
+    "866d4b18ba96a1c34a11e85b6bb6e6d42db38d39": 1768779736
   },
-  "global_last_post_ts": 1768774873,
+  "global_last_post_ts": 1768779736,
   "pending_approvals": {
-    "f240cc867b": {
-      "created_at": "2026-01-18T22:19:57Z",
-      "preview_text": "\ud83d\udea8 YELLOW ADVISORY - BLOWING SNOW (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udfe1 - BLOWING SNOW (Tay Township area) advisory in Tay Township\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 - BLOWING SNOW (Tay Township area) advisory in Tay Township\nSignificantly reduced visibility at times in blowing snow. Westerly winds gusting 60 to 80 km/h. Wind chills between minus 20 and minus 25.\nMonday afternoon through Monday evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nAlert type: ADVISORY\n\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
-      "kind": "advisory",
-      "buttons_message_id": 39,
+    "989cc8df02": {
+      "created_at": "2026-01-18T23:41:24Z",
+      "preview_text": "\ud83d\udea8 YELLOW WATCH - SNOW SQUALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udfe1 - SNOW SQUALL (Tay Township area) watch in Tay Township\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 - SNOW SQUALL (Tay Township area) watch in Tay Township\nSignificantly reduced visibility at times in blowing snow. Westerly winds gusting 60 to 80 km/h. Wind chills between minus 20 and minus 25.\nMonday afternoon through Monday evening.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nAlert type: WATCH\n\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
+      "kind": "watch",
+      "buttons_message_id": 47,
       "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-01-18T22:19:57Z"
+      "last_preview_sent_at": "2026-01-18T23:41:24Z"
     }
   },
   "approval_decisions": {
@@ -94,6 +97,11 @@
     "5dbea403ad": {
       "decision": "approved",
       "decided_at": "2026-01-13T04:03:16Z"
+    },
+    "f240cc867b": {
+      "decision": "denied",
+      "decided_at": "2026-01-18T23:41:23Z",
+      "reason": "expired"
     }
   },
   "telegram_last_update_id": 259933366,
@@ -103,8 +111,8 @@
     "decided_at": "2026-01-05T19:01:12Z"
   },
   "test_gate_token": "5dbea403ad",
-  "fb_last_posted_at": "2026-01-18T22:20:53.203740Z",
-  "fb_cooldown_until": "2026-01-18T23:20:53.203740Z",
+  "fb_last_posted_at": "2026-01-18T23:41:54.471949Z",
+  "fb_cooldown_until": "2026-01-19T00:41:54.471949Z",
   "telegram_last_remix_seen": {},
   "telegram_remix_count": {
     "9e9b11f786": 1
