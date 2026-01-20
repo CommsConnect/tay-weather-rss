@@ -15,18 +15,20 @@
 #     * call wait_for_decision(...) and respect denied
 #     * if remix/custom flags are present -> regenerate preview and call update_preview(...)
 #
-# SECURITY BEST PRACTICES INCLUDED
-# - Never logs secrets
+# SECURITY / RELIABILITY BEST PRACTICES (recommended)
+# - Never logs secrets (tokens/chat ids/custom text)
 # - Optional allow-list of Telegram user IDs (TELEGRAM_ALLOWED_USER_IDS)
 # - Validates callbacks/messages come from the expected chat (when enforceable)
-# - Validates token format
+# - Validates token format (prevents weird callback injection / state poisoning)
 # - Auto-heals Telegram group -> supergroup migrations (updates chat_id runtime + retries once)
 # - wait_for_decision can reload state from disk each poll (load_state_fn/state_path)
-#
-# CONFIRMATION RELIABILITY (fixes “no confirmation message”)
-# - ALWAYS calls answerCallbackQuery (toast) on button press
-# - Tries to edit the buttons message to confirm + remove buttons
-# - If edit fails for any reason, sends a standalone confirmation message as fallback
+# - CONFIRMATION RELIABILITY:
+#     * ALWAYS calls answerCallbackQuery (toast) on button press
+#     * Tries to edit the buttons message to confirm + remove buttons
+#     * If edit fails for any reason, sends a standalone confirmation message as fallback
+# - OUTPUT SANITIZATION:
+#     * strip redundant EC-style location suffix "(Tay Township area ...)" at the FINAL send/edit layer
+#       so it never leaks to Telegram, regardless of caller behaviour.
 #
 from __future__ import annotations
 
@@ -70,6 +72,25 @@ if _ALLOWED:
 # Small helpers
 # ---------------------------------------------------------------------
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
+
+# Removes redundant EC-style location suffix like "(Tay Township area)"
+_AREA_PAREN_RE = re.compile(r"\s*\(\s*Tay Township area[^)]*\)\s*", flags=re.IGNORECASE)
+
+
+def strip_redundant_area(text: str) -> str:
+    """
+    Removes redundant EC-style parenthetical location suffix like:
+      "(Tay Township area)"
+    and cleans up spacing/punctuation.
+    """
+    t = (text or "")
+    # remove any parenthetical containing "Tay Township area..."
+    t = _AREA_PAREN_RE.sub(" ", t)
+    # clean up double spaces
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    # clean up space before punctuation
+    t = re.sub(r"\s+([.,;:!?])", r"\1", t)
+    return t.strip()
 
 
 def _utc_now_z() -> str:
@@ -195,9 +216,14 @@ def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) ->
 
     NOTE: reply_markup can only be attached to ONE message, so we attach it
     to the LAST chunk.
+
+    BEST PRACTICE:
+    - Always sanitize at the FINAL send layer so caller mistakes can't leak.
     """
     _require_config()
-    text = (text or "")
+
+    # FINAL SAFETY: always strip redundant "(Tay Township area ...)" before sending
+    text = strip_redundant_area(text or "")
 
     # Keep under Telegram's 4096 hard limit with some buffer.
     max_len = 4000
@@ -240,6 +266,9 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
       - If caption <= 1024: include it on the first photo
       - If caption > 1024: send media group with a SHORT caption, then send
         the full caption below via tg_send_message() (chunked).
+
+    BEST PRACTICE:
+    - Always sanitize caption at the FINAL send layer.
     """
     _require_config()
 
@@ -247,7 +276,9 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
         return tg_send_message(caption) if caption else {"ok": True, "result": None}
 
     image_urls = image_urls[:10]
-    caption = (caption or "")
+
+    # FINAL SAFETY: always strip redundant "(Tay Township area ...)" before sending
+    caption = strip_redundant_area(caption or "")
 
     CAPTION_LIMIT = 1024
     overflow_text = ""
@@ -278,6 +309,10 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
 
 def tg_edit_message_text(chat_id: str, message_id: int, text: str) -> None:
     _require_config()
+
+    # FINAL SAFETY: ensure edits also strip redundant "(Tay Township area ...)"
+    text = strip_redundant_area(text or "")
+
     payload: Dict[str, Any] = {
         "chat_id": chat_id,
         "message_id": message_id,
@@ -690,7 +725,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
 
         if mode == "x":
             if is_twitter_length_valid(text):
-                state["telegram_custom_text"][token_p]["x"] = text
+                state["telegram_custom_text"][token_p]["x"] = strip_redundant_area(text)
                 state["telegram_custom_pending"]["mode"] = "fb"
                 try:
                     tg_send_message(
@@ -707,7 +742,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
             changed = True
 
         elif mode == "fb":
-            state["telegram_custom_text"][token_p]["fb"] = text
+            state["telegram_custom_text"][token_p]["fb"] = strip_redundant_area(text)
             state["telegram_custom_pending"] = None
             try:
                 tg_send_message("✅ Facebook text saved. I’ll send a new preview.")
@@ -732,6 +767,8 @@ def ensure_preview_sent(
 ) -> None:
     """
     Send preview once (initial).
+    - If already pending/decided for this token, do nothing.
+    - Cleans redundant "(Tay Township area ...)" before sending and storing.
     """
     _ensure_state_defaults(state)
 
@@ -740,17 +777,22 @@ def ensure_preview_sent(
         raise ValueError("Invalid token format")
 
     # If we already have pending or decided, do not re-send initial gate
-    if token in state["pending_approvals"] or token in state["approval_decisions"]:
+    if token in (state.get("pending_approvals") or {}) or token in (state.get("approval_decisions") or {}):
         return
 
-    _send_preview_payload(preview_text, image_urls)
+    # Clean once + use consistently
+    cleaned_preview = strip_redundant_area(preview_text)
 
+    # Send preview content (media group or text)
+    _send_preview_payload(cleaned_preview, image_urls)
+
+    # Send buttons message and remember IDs so we can edit/disable it later
     sent = tg_send_message(f"TOKEN: {token}\nSelect an action:", reply_markup=_inline_keyboard(token))
-    msg_id = sent.get("result", {}).get("message_id", 0)
+    msg_id = int((sent.get("result") or {}).get("message_id") or 0)
 
-    state["pending_approvals"][token] = {
+    state.setdefault("pending_approvals", {})[token] = {
         "created_at": _utc_now_z(),
-        "preview_text": preview_text,
+        "preview_text": cleaned_preview,
         "kind": kind,
         "buttons_message_id": msg_id,
         "buttons_chat_id": TELEGRAM_CHAT_ID,
@@ -768,29 +810,44 @@ def update_preview(
 ) -> None:
     """
     Send an UPDATED preview for an existing pending token, and refresh stored preview_text.
-    Buttons remain the same token.
+    Buttons remain tied to the same token.
     """
     _ensure_state_defaults(state)
+
     token = (token or "").strip()
     if not TOKEN_RE.match(token):
         return
-    if token not in (state.get("pending_approvals") or {}):
+
+    pending = state.get("pending_approvals") or {}
+    if token not in pending:
         return
 
-    _send_preview_payload(new_preview_text, image_urls)
+    # Clean once + use consistently
+    cleaned_preview = strip_redundant_area(new_preview_text)
 
-    state["pending_approvals"][token]["preview_text"] = new_preview_text
-    state["pending_approvals"][token]["last_preview_sent_at"] = _utc_now_z()
+    # Send updated preview content
+    _send_preview_payload(cleaned_preview, image_urls)
+
+    # Store cleaned version
+    pending[token]["preview_text"] = cleaned_preview
+    pending[token]["last_preview_sent_at"] = _utc_now_z()
     save_fn(state)
 
 
 def _send_preview_payload(preview_text: str, image_urls: Optional[List[str]]) -> None:
+    """
+    Sends preview text (and optional images). Keeps a safety-net clean even though callers
+    should already pass cleaned text.
+    """
+    preview_text = strip_redundant_area(preview_text)
+
     try:
         if image_urls:
             tg_send_media_group(image_urls, caption=f"{preview_text}\n\nUse buttons below to manage.")
         else:
             tg_send_message(preview_text)
     except Exception:
+        # Fallback to text-only
         try:
             tg_send_message("Error sending media, sending text only.")
         except Exception:
