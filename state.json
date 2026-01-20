@@ -1,43 +1,43 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:20260110044538",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119104638",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119203550",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119085224",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120063805",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119224806",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120201830",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119070752",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
-    "tag:weather.gc.ca,2013-04-16:20260111171610",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119141646",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119111929",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120100420",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111160037",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120063805",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120201830",
+    "tag:weather.gc.ca,2013-04-16:20260110044541",
+    "tag:weather.gc.ca,2013-04-16:20260111171610",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119070752",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119104638",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119224806",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120100420",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119104638",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119085224",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119141646",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120151920",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
-    "tag:weather.gc.ca,2013-04-16:20260110044541"
+    "tag:weather.gc.ca,2013-04-16:20260110044538",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119111929",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111160037",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744"
   ],
   "posted_text_hashes": [
-    "6f927e08253fe620675bc55235d81cfdd8df3b7f",
-    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
     "acdf2393f67ed669f36803531d5560322e55c402",
-    "ff880cbf6a41e8d09bfd4f97f1c574b8874ebc12",
-    "4c571d6d3ab8580986056227ad51f29a2fa89d0a",
+    "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
     "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
-    "f71a5677714392db9bd32279a6b53c325f433d70",
+    "4c571d6d3ab8580986056227ad51f29a2fa89d0a",
     "788b264da1732b8d7f5e6869a5de1afd50b85290",
+    "6f927e08253fe620675bc55235d81cfdd8df3b7f",
     "bf16ef8b61268a9d095993aaf41529dfd6cfab7e",
+    "ff880cbf6a41e8d09bfd4f97f1c574b8874ebc12",
+    "f71a5677714392db9bd32279a6b53c325f433d70",
     "ae01a9a05fb0b01a6236030f55defaf9e0fb3fd0"
   ],
   "cooldowns": {
@@ -48,13 +48,13 @@
   },
   "global_last_post_ts": 1768906616,
   "pending_approvals": {
-    "2d08d0d810": {
-      "created_at": "2026-01-20T10:28:45Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOW SQUALL (Tay Township area)\n\n----- X (will post) -----\n\ud83d\udfe1 - SNOW SQUALL (Tay Township area) warning in Tay Township\nAdditional snowfall accumulations of 10 to 20 cm. Near zero visibility in heavy snow and blowing snow.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 - SNOW SQUALL (Tay Township area) warning in Tay Township\nAdditional snowfall accumulations of 10 to 20 cm. Near zero visibility in heavy snow and blowing snow.\nContinuing through this morning.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
+    "6d50a87665": {
+      "created_at": "2026-01-20T22:23:30Z",
+      "preview_text": "\ud83d\udfe2 YELLOW WARNING - SNOW SQUALL ENDED ----- X (will post) -----\n\ud83d\udfe2 - SNOW SQUALL ENDED warning in Tay Township\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 - SNOW SQUALL ENDED warning in Tay Township\nBookmarking your customized list will allow you to access it even if the local storage on your device is erased.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
       "kind": "warning",
-      "buttons_message_id": 68,
+      "buttons_message_id": 73,
       "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-01-20T10:28:45Z"
+      "last_preview_sent_at": "2026-01-20T22:23:30Z"
     }
   },
   "approval_decisions": {
@@ -131,6 +131,11 @@
     "d392e334d4": {
       "decision": "denied",
       "decided_at": "2026-01-20T10:28:44Z",
+      "reason": "expired"
+    },
+    "2d08d0d810": {
+      "decision": "denied",
+      "decided_at": "2026-01-20T22:23:29Z",
       "reason": "expired"
     }
   },
