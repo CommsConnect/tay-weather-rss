@@ -1,48 +1,50 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120063805",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119104638",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119224806",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
     "tag:weather.gc.ca,2013-04-16:20260111171610",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119104638",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119070752",
-    "tag:weather.gc.ca,2013-04-16:20260110044541",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111160037",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119141646",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120100420",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119203550",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119111929",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120063805",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111160037",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119224806",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119104638",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
+    "tag:weather.gc.ca,2013-04-16:20260110044541",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119203550",
     "tag:weather.gc.ca,2013-04-16:20260110044538",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119141646",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119070752",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119085224",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119111929"
   ],
   "posted_text_hashes": [
+    "acdf2393f67ed669f36803531d5560322e55c402",
     "6f927e08253fe620675bc55235d81cfdd8df3b7f",
+    "ff880cbf6a41e8d09bfd4f97f1c574b8874ebc12",
     "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
     "788b264da1732b8d7f5e6869a5de1afd50b85290",
+    "f71a5677714392db9bd32279a6b53c325f433d70",
     "4c571d6d3ab8580986056227ad51f29a2fa89d0a",
-    "bf16ef8b61268a9d095993aaf41529dfd6cfab7e",
-    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
     "ae01a9a05fb0b01a6236030f55defaf9e0fb3fd0",
-    "ff880cbf6a41e8d09bfd4f97f1c574b8874ebc12",
-    "f71a5677714392db9bd32279a6b53c325f433d70"
+    "bf16ef8b61268a9d095993aaf41529dfd6cfab7e",
+    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e"
   ],
   "cooldowns": {
     "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768139486,
-    "8cba3a1a17596318031764df06a0b1df5e042d7f": 1768866181,
+    "8cba3a1a17596318031764df06a0b1df5e042d7f": 1768906616,
     "ff0a63ffc349e53f3fb9c78829f24316ddbb29d5": 1768774873,
     "866d4b18ba96a1c34a11e85b6bb6e6d42db38d39": 1768779736
   },
-  "global_last_post_ts": 1768866181,
+  "global_last_post_ts": 1768906616,
   "pending_approvals": {
     "2d08d0d810": {
       "created_at": "2026-01-20T10:28:45Z",
@@ -137,8 +139,8 @@
     "decided_at": "2026-01-05T19:01:12Z"
   },
   "test_gate_token": "5dbea403ad",
-  "fb_last_posted_at": "2026-01-19T23:42:39.399031Z",
-  "fb_cooldown_until": "2026-01-20T00:42:39.399031Z",
+  "fb_last_posted_at": "2026-01-20T10:56:28.445383Z",
+  "fb_cooldown_until": "2026-01-20T11:56:28.445383Z",
   "telegram_last_remix_seen": {},
   "telegram_remix_count": {
     "9e9b11f786": 1
