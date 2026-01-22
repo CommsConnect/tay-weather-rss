@@ -373,7 +373,7 @@ def _url_looks_ok(url: str) -> bool:
 
 
 def resolve_more_info_url() -> str:
-    if TAY_ALERTS_URL and _url_looks_ok(TAY_ALERTS_URL):
+    if TAY_ALERTS_URL:
         return TAY_ALERTS_URL
     return TAY_COORDS_URL
 
@@ -515,11 +515,14 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             return ""
         if re.match(r"^\s*issued\b", s, flags=re.IGNORECASE):
             return ""
+        if "bookmarking your customized list" in s.lower():
+            return ""
         if "continue to monitor" in s.lower():
             return ""
         if "share this page" in s.lower():
             return ""
         return s
+
 
     m_what = re.search(r"What:\s*(.+?)(?=\s+(When:|Where:|Additional information:))", text, re.IGNORECASE)
     m_when = re.search(r"When:\s*(.+?)(?=\s+(Where:|Additional information:)|$)", text, re.IGNORECASE)
@@ -1270,6 +1273,16 @@ def build_rss_description_from_atom(entry: Dict[str, Any], more_url: str) -> str
 # =============================================================================
 # Social text formatting
 # =============================================================================
+
+# Remove the specific EC area parenthetical from anywhere in a string
+_TAY_AREA_PAREN_RE = re.compile(r"\s*\(\s*Tay Township area[^)]*\)\s*", flags=re.IGNORECASE)
+
+def strip_tay_area_paren(s: str) -> str:
+    s = (s or "")
+    s = _TAY_AREA_PAREN_RE.sub(" ", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    return s.strip()
+
 def _pretty_title_for_social(title: str) -> str:
     """
     Converts EC banner title like:
@@ -1296,7 +1309,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     - We ignore `care` entirely for X.
     - We allow optional `custom_x` (manual add-on) only if it fits within 280 chars.
     """
-    title_raw = atom_title_for_tay((entry.get("title") or "").strip())
+    title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
 
@@ -1344,7 +1357,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
 
 
 def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, custom_fb: str = "") -> str:
-    title_raw = atom_title_for_tay((entry.get("title") or "").strip())
+    title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
 
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
@@ -1726,7 +1739,7 @@ def main() -> None:
                 care = pick_care_statement(care_rows, care_severity, type_label)
 
                 if care:
-                    print(f"CareStatements: matched ({sev} / {type_label})")
+                    print(f"CareStatements: matched ({care_severity} / {type_label})")
                 else:
                     print(f"CareStatements: no match for ({sev} / {type_label})")
                 print("CareStatements: chosen text:", (care[:120] + "…") if care and len(care) > 120 else care)
@@ -1756,7 +1769,7 @@ def main() -> None:
         # ---------------------------------------------------------
         if TELEGRAM_ENABLE_GATE:
             token = hashlib.sha1(guid.encode("utf-8")).hexdigest()[:10]
-
+            
             ingest_telegram_actions(state, save_state)
             maybe_send_reminders(state, save_state)
 
@@ -1904,11 +1917,22 @@ def main() -> None:
                     tg_send_message(f"✅ APPROVED — proceeding to post now.\nTOKEN: {token}")
                 except Exception:
                     pass
-
         else:
             print("Telegram gate disabled — skipping social post (safe default).")
             continue
 
+        # ✅ FINAL DENY GUARD (prevents deny-click race right before posting)
+        if TELEGRAM_ENABLE_GATE:
+            ingest_telegram_actions(state, save_state)
+            if decision_for(state, token) == "denied":
+                print(f"🛑 Final guard: token={token} was denied. Skipping post.")
+                try:
+                    tg_send_message(f"🛑 DENIED — will NOT post.\nTOKEN: {token}")
+                except Exception:
+                    pass
+                continue
+
+        
         # ---------------------------------------------------------
         # Post now (capture outcomes + confirm to Telegram)
         # ---------------------------------------------------------
