@@ -1,49 +1,49 @@
 {
   "seen_ids": [],
   "posted_guids": [
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120220539",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120151920",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122042254",
-    "tag:weather.gc.ca,2013-04-16:20260120231506",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120201830",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119104638",
-    "tag:weather.gc.ca,2013-04-16:20260111171610",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119141646",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
     "tag:weather.gc.ca,2013-04-16:20260110044541",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119203550",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120100420",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119224806",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119104638",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119085224",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119070752",
-    "tag:weather.gc.ca,2013-04-16:20260110044538",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120201830",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119104638",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105175932",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120220539",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119141646",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120151920",
+    "tag:weather.gc.ca,2013-04-16:20260120231506",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119224806",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111160037",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119111929",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260105095745",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119104638",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120063805",
-    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260111132434"
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110033202",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119111929",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
+    "tag:weather.gc.ca,2013-04-16:20260111171610",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260119203550",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260118230107",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260120100420",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122042254",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105173337",
+    "tag:weather.gc.ca,2013-04-16:20260110044538",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
+    "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260119070752"
   ],
   "posted_text_hashes": [
     "ae01a9a05fb0b01a6236030f55defaf9e0fb3fd0",
-    "ff880cbf6a41e8d09bfd4f97f1c574b8874ebc12",
-    "788b264da1732b8d7f5e6869a5de1afd50b85290",
-    "528471afa6b1e4d36cca0336258871cc4e7b9191",
-    "6f927e08253fe620675bc55235d81cfdd8df3b7f",
-    "4c571d6d3ab8580986056227ad51f29a2fa89d0a",
+    "acdf2393f67ed669f36803531d5560322e55c402",
     "d55fa20e3c6db9f5eb3addbd7bb9b903c1f17f20",
     "f71a5677714392db9bd32279a6b53c325f433d70",
-    "bf16ef8b61268a9d095993aaf41529dfd6cfab7e",
+    "ff880cbf6a41e8d09bfd4f97f1c574b8874ebc12",
+    "528471afa6b1e4d36cca0336258871cc4e7b9191",
+    "4c571d6d3ab8580986056227ad51f29a2fa89d0a",
+    "6f927e08253fe620675bc55235d81cfdd8df3b7f",
     "0607f7e5abe33de2b4d91dd2d7f56974b770684a",
-    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e",
-    "acdf2393f67ed669f36803531d5560322e55c402"
+    "788b264da1732b8d7f5e6869a5de1afd50b85290",
+    "bf16ef8b61268a9d095993aaf41529dfd6cfab7e",
+    "6e3b2f561a00f81b6a7c7ff30497fd3b08db557e"
   ],
   "cooldowns": {
     "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768139486,
@@ -53,13 +53,13 @@
   },
   "global_last_post_ts": 1769059767,
   "pending_approvals": {
-    "12a25674c4": {
-      "created_at": "2026-01-22T04:49:42Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOW SQUALL ----- X (will post) -----\n\ud83d\udfe1 - SNOW SQUALL warning in Tay Township\nLocal snowfall amounts of 20 to 40 cm. Significantly reduced visibility in heavy snow and blowing snow.\nEnvironment Canada\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 - SNOW SQUALL warning in Tay Township\nLocal snowfall amounts of 20 to 40 cm. Significantly reduced visibility in heavy snow and blowing snow.\nTonight continuing through Friday.\nEnvironment Canada\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
+    "b9edf1b1b4": {
+      "created_at": "2026-01-22T10:28:09Z",
+      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOW SQUALL ----- X (will post) -----\n\ud83d\udfe1 - SNOW SQUALL warning in Tay Township\nLocal snowfall amounts of 20 to 40 cm. Significantly reduced visibility in heavy snow and blowing snow.\nToday continuing through Friday.\nEnvironment Canada\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 - SNOW SQUALL warning in Tay Township\nLocal snowfall amounts of 20 to 40 cm. Significantly reduced visibility in heavy snow and blowing snow.\nToday continuing through Friday.\nEnvironment Canada\nMore: https://weatherpresenter.github.io/tay-weather-rss/tay/\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weatherpresenter.github.io/tay-weather-rss/tay/",
       "kind": "warning",
-      "buttons_message_id": 88,
+      "buttons_message_id": 93,
       "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-01-22T04:49:42Z"
+      "last_preview_sent_at": "2026-01-22T10:28:09Z"
     }
   },
   "approval_decisions": {
@@ -155,6 +155,11 @@
     "7c50812dbd": {
       "decision": "denied",
       "decided_at": "2026-01-22T03:19:03Z"
+    },
+    "12a25674c4": {
+      "decision": "denied",
+      "decided_at": "2026-01-22T10:28:08Z",
+      "reason": "expired"
     }
   },
   "telegram_last_update_id": 259933373,
