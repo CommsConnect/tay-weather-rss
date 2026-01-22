@@ -50,16 +50,7 @@
     "866d4b18ba96a1c34a11e85b6bb6e6d42db38d39": 1768779736
   },
   "global_last_post_ts": 1768949121,
-  "pending_approvals": {
-    "6d50a87665": {
-      "created_at": "2026-01-20T22:23:30Z",
-      "preview_text": "\ud83d\udfe2 YELLOW WARNING - SNOW SQUALL ENDED ----- X (will post) -----\n\ud83d\udfe2 - SNOW SQUALL ENDED warning in Tay Township\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 - SNOW SQUALL ENDED warning in Tay Township\nBookmarking your customized list will allow you to access it even if the local storage on your device is erased.\nEnvironment Canada\nMore: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://weather.gc.ca/en/location/index.html?coords=44.751,-79.768",
-      "kind": "warning",
-      "buttons_message_id": 73,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-01-20T22:23:30Z"
-    }
-  },
+  "pending_approvals": {},
   "approval_decisions": {
     "42f5cba59f": {
       "decision": "approved",
@@ -140,15 +131,24 @@
       "decision": "denied",
       "decided_at": "2026-01-20T22:23:29Z",
       "reason": "expired"
+    },
+    "6d50a87665": {
+      "decision": "denied",
+      "decided_at": "2026-01-22T03:16:25Z",
+      "reason": "expired"
+    },
+    "0e99c29fc0": {
+      "decision": "denied",
+      "decided_at": "2026-01-22T03:17:56Z"
     }
   },
-  "telegram_last_update_id": 259933366,
+  "telegram_last_update_id": 259933372,
   "telegram_last_signal": {
     "token": "8a7345cd7a",
     "decision": "approved",
     "decided_at": "2026-01-05T19:01:12Z"
   },
-  "test_gate_token": "5dbea403ad",
+  "test_gate_token": "0e99c29fc0",
   "fb_last_posted_at": "2026-01-20T22:44:51.516760Z",
   "fb_cooldown_until": "2026-01-20T23:44:51.516760Z",
   "telegram_last_remix_seen": {},
