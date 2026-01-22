@@ -15,20 +15,18 @@
 #     * call wait_for_decision(...) and respect denied
 #     * if remix/custom flags are present -> regenerate preview and call update_preview(...)
 #
-# SECURITY / RELIABILITY BEST PRACTICES (recommended)
-# - Never logs secrets (tokens/chat ids/custom text)
+# SECURITY BEST PRACTICES INCLUDED
+# - Never logs secrets
 # - Optional allow-list of Telegram user IDs (TELEGRAM_ALLOWED_USER_IDS)
 # - Validates callbacks/messages come from the expected chat (when enforceable)
-# - Validates token format (prevents weird callback injection / state poisoning)
+# - Validates token format
 # - Auto-heals Telegram group -> supergroup migrations (updates chat_id runtime + retries once)
 # - wait_for_decision can reload state from disk each poll (load_state_fn/state_path)
-# - CONFIRMATION RELIABILITY:
-#     * ALWAYS calls answerCallbackQuery (toast) on button press
-#     * Tries to edit the buttons message to confirm + remove buttons
-#     * If edit fails for any reason, sends a standalone confirmation message as fallback
-# - OUTPUT SANITIZATION:
-#     * strip redundant EC-style location suffix "(Tay Township area ...)" at the FINAL send/edit layer
-#       so it never leaks to Telegram, regardless of caller behaviour.
+#
+# CONFIRMATION RELIABILITY
+# - ALWAYS calls answerCallbackQuery (toast) on button press
+# - Tries to edit the buttons message to confirm + remove buttons
+# - If edit fails for any reason, sends a standalone confirmation message as fallback
 #
 from __future__ import annotations
 
@@ -76,20 +74,35 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 # Removes redundant EC-style location suffix like "(Tay Township area)"
 _AREA_PAREN_RE = re.compile(r"\s*\(\s*Tay Township area[^)]*\)\s*", flags=re.IGNORECASE)
 
+# Removes EC boilerplate that sometimes gets scraped into alert text
+# (Keep this VERY specific to avoid unintended deletions.)
+_EC_BOOKMARK_RE = re.compile(
+    r"(?im)^[ \t]*Bookmarking your customized list will allow you to access it even if the local storage on your device is erased\.[ \t]*$"
+)
+
 
 def strip_redundant_area(text: str) -> str:
     """
-    Removes redundant EC-style parenthetical location suffix like:
-      "(Tay Township area)"
-    and cleans up spacing/punctuation.
+    Minimal, safe sanitization:
+      - remove "(Tay Township area ...)" parenthetical only
+      - remove the known EC 'Bookmarking your customized list...' boilerplate line
+      - normalize excessive spaces / blank lines
+    IMPORTANT: does NOT alter punctuation around URLs (so links won't change).
     """
     t = (text or "")
-    # remove any parenthetical containing "Tay Township area..."
+
+    # 1) remove the specific redundant parenthetical
     t = _AREA_PAREN_RE.sub(" ", t)
-    # clean up double spaces
+
+    # 2) remove the known EC boilerplate line (whole line only)
+    t = _EC_BOOKMARK_RE.sub("", t)
+
+    # 3) collapse repeated spaces/tabs (but do not touch punctuation)
     t = re.sub(r"[ \t]{2,}", " ", t)
-    # clean up space before punctuation
-    t = re.sub(r"\s+([.,;:!?])", r"\1", t)
+
+    # 4) collapse 3+ blank lines down to 2
+    t = re.sub(r"\n{3,}", "\n\n", t)
+
     return t.strip()
 
 
@@ -216,13 +229,10 @@ def tg_send_message(text: str, reply_markup: Optional[Dict[str, Any]] = None) ->
 
     NOTE: reply_markup can only be attached to ONE message, so we attach it
     to the LAST chunk.
-
-    BEST PRACTICE:
-    - Always sanitize at the FINAL send layer so caller mistakes can't leak.
     """
     _require_config()
 
-    # FINAL SAFETY: always strip redundant "(Tay Township area ...)" before sending
+    # FINAL SAFETY: sanitize ONLY the known junk, do not rewrite punctuation/URLs
     text = strip_redundant_area(text or "")
 
     # Keep under Telegram's 4096 hard limit with some buffer.
@@ -266,9 +276,6 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
       - If caption <= 1024: include it on the first photo
       - If caption > 1024: send media group with a SHORT caption, then send
         the full caption below via tg_send_message() (chunked).
-
-    BEST PRACTICE:
-    - Always sanitize caption at the FINAL send layer.
     """
     _require_config()
 
@@ -277,7 +284,7 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
 
     image_urls = image_urls[:10]
 
-    # FINAL SAFETY: always strip redundant "(Tay Township area ...)" before sending
+    # FINAL SAFETY: sanitize ONLY known junk, do not rewrite punctuation/URLs
     caption = strip_redundant_area(caption or "")
 
     CAPTION_LIMIT = 1024
@@ -310,7 +317,7 @@ def tg_send_media_group(image_urls: List[str], caption: str = "") -> Dict[str, A
 def tg_edit_message_text(chat_id: str, message_id: int, text: str) -> None:
     _require_config()
 
-    # FINAL SAFETY: ensure edits also strip redundant "(Tay Township area ...)"
+    # FINAL SAFETY: sanitize edits too
     text = strip_redundant_area(text or "")
 
     payload: Dict[str, Any] = {
@@ -388,6 +395,7 @@ def _ensure_state_defaults(state: Dict[str, Any]) -> None:
     state.setdefault("telegram_remix_count", {})       # token -> int
     state.setdefault("telegram_custom_pending", None)  # {token, mode, created_at}
     state.setdefault("telegram_custom_text", {})       # token -> {"x": str|None, "fb": str|None}
+    state.setdefault("telegram_last_reminder_at", {})  # token -> iso time (avoid spam)
     state.setdefault("telegram_last_reminder_at", {})  # token -> iso time (avoid spam)
 
 
@@ -603,7 +611,6 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
                 continue
 
             # If token not pending anymore, still ACK so Telegram UI doesn’t feel broken
-            # (e.g., someone clicks after it was already decided)
             if token not in (state.get("pending_approvals") or {}) and action in ("go", "no"):
                 tg_answer_callback_query_safe(cb_id, text="Already decided.")
                 continue
@@ -725,6 +732,7 @@ def ingest_telegram_actions(state: Dict[str, Any], save_fn: Callable[[Dict[str, 
 
         if mode == "x":
             if is_twitter_length_valid(text):
+                # Keep sanitization minimal and consistent
                 state["telegram_custom_text"][token_p]["x"] = strip_redundant_area(text)
                 state["telegram_custom_pending"]["mode"] = "fb"
                 try:
@@ -768,7 +776,8 @@ def ensure_preview_sent(
     """
     Send preview once (initial).
     - If already pending/decided for this token, do nothing.
-    - Cleans redundant "(Tay Township area ...)" before sending and storing.
+    - Cleans redundant "(Tay Township area ...)" and the EC bookmark boilerplate
+      before sending and storing.
     """
     _ensure_state_defaults(state)
 
@@ -780,13 +789,10 @@ def ensure_preview_sent(
     if token in (state.get("pending_approvals") or {}) or token in (state.get("approval_decisions") or {}):
         return
 
-    # Clean once + use consistently
     cleaned_preview = strip_redundant_area(preview_text)
 
-    # Send preview content (media group or text)
     _send_preview_payload(cleaned_preview, image_urls)
 
-    # Send buttons message and remember IDs so we can edit/disable it later
     sent = tg_send_message(f"TOKEN: {token}\nSelect an action:", reply_markup=_inline_keyboard(token))
     msg_id = int((sent.get("result") or {}).get("message_id") or 0)
 
@@ -822,13 +828,10 @@ def update_preview(
     if token not in pending:
         return
 
-    # Clean once + use consistently
     cleaned_preview = strip_redundant_area(new_preview_text)
 
-    # Send updated preview content
     _send_preview_payload(cleaned_preview, image_urls)
 
-    # Store cleaned version
     pending[token]["preview_text"] = cleaned_preview
     pending[token]["last_preview_sent_at"] = _utc_now_z()
     save_fn(state)
@@ -836,8 +839,7 @@ def update_preview(
 
 def _send_preview_payload(preview_text: str, image_urls: Optional[List[str]]) -> None:
     """
-    Sends preview text (and optional images). Keeps a safety-net clean even though callers
-    should already pass cleaned text.
+    Sends preview text (and optional images).
     """
     preview_text = strip_redundant_area(preview_text)
 
@@ -847,7 +849,6 @@ def _send_preview_payload(preview_text: str, image_urls: Optional[List[str]]) ->
         else:
             tg_send_message(preview_text)
     except Exception:
-        # Fallback to text-only
         try:
             tg_send_message("Error sending media, sending text only.")
         except Exception:
@@ -871,19 +872,16 @@ def wait_for_decision(
     poll_interval_seconds: Optional[int] = None,   # alias supported (older callers)
     load_state_fn: Optional[Callable[[], Dict[str, Any]]] = None,  # BEST: reload from disk each poll
     state_path: Optional[str] = None,              # alternative: reload from JSON path each poll
-    ingest_each_poll: bool = False,                # optional: call ingest_telegram_actions each poll (needs save_state_fn)
+    ingest_each_poll: bool = True,                 # BEST PRACTICE: process button clicks during wait
     **kwargs,                                      # swallow unexpected args safely
 ) -> str:
     """
     Waits for Approve/Deny on a pending token.
 
     IMPORTANT:
-    - If you want this to *actually see* Telegram decisions, provide either:
-        * load_state_fn, OR
-        * state_path
-      so it can reload state each poll.
-    - Optionally set ingest_each_poll=True to process new button clicks while waiting
-      (useful in Actions where no other loop is running).
+    - To reliably see Deny/Approve while waiting, this function will (by default)
+      ingest Telegram updates each poll IF save_state_fn is provided.
+    - Provide either load_state_fn OR state_path so state is reloaded each poll.
     """
     if poll_interval_seconds is not None:
         poll_seconds = int(poll_interval_seconds)
@@ -929,7 +927,7 @@ def wait_for_decision(
         soft_deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(max_wait_seconds))
 
     while True:
-        # optional: process new updates while we wait
+        # Process new Telegram updates while waiting (ensures Deny prevents posting)
         if ingest_each_poll and save_state_fn is not None:
             try:
                 tmp = _reload()
