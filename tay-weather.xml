@@ -6,7 +6,10 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122223237</guid><pubDate>Thu, 22 Jan 2026 22:32:37 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
+<item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260123042459</guid><pubDate>Fri, 23 Jan 2026 04:24:59 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
+Issued: 11:24 PM EST Thursday 22 January 2026
+More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122223237</guid><pubDate>Thu, 22 Jan 2026 22:32:37 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
 Issued: 5:32 PM EST Thursday 22 January 2026
 More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122165144</guid><pubDate>Thu, 22 Jan 2026 16:51:44 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
@@ -77,9 +80,6 @@ Issued: 12:59 PM EST Monday 5 January 2026
 More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOWFALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105155647</guid><pubDate>Mon, 05 Jan 2026 15:56:47 +0000</pubDate><description>YELLOW WARNING - SNOWFALL (Tay Township area)
 Issued: 10:56 AM EST Monday 5 January 2026
-More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOWFALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105153929</guid><pubDate>Mon, 05 Jan 2026 15:39:29 +0000</pubDate><description>YELLOW WARNING - SNOWFALL (Tay Township area)
-Issued: 10:39 AM EST Monday 5 January 2026
 More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
