@@ -89,8 +89,8 @@ jobs:
 
       # --- Feeds & images ---
       ALERT_FEED_URL: https://weather.gc.ca/rss/battleboard/onrm94_e.xml
-      TAY_COORDS_URL: https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768
-      TAY_ALERTS_URL: https://weatherpresenter.github.io/tay-weather-rss/tay/
+      TAY_COORDS_URL: https://tayweather.short.gy/alert
+      TAY_ALERTS_URL: https://tayweather.short.gy/alert
       CR29_NORTH_IMAGE_URL: https://511on.ca/map/Cctv/400
       CR29_SOUTH_IMAGE_URL: https://511on.ca/map/Cctv/402
 
