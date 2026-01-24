@@ -107,7 +107,7 @@ DISPLAY_AREA_NAME = "Tay Township area"
 
 # Public URLs:
 TAY_ALERTS_URL = (os.getenv("TAY_ALERTS_URL") or "").strip()
-TAY_COORDS_URL = (os.getenv("TAY_COORDS_URL") or "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768").strip()
+TAY_COORDS_URL = (os.getenv("TAY_COORDS_URL") or "https://tayweather.short.gy/alert").strip()
 
 # =============================================================================
 # Ontario 511 camera resolver settings
@@ -604,8 +604,29 @@ def load_care_statements_rows() -> List[dict]:
 
 
 def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> str:
+    """Return a single care statement text (or "").
+
+    This is intentionally tolerant of *slightly different* Google Sheet schemas.
+
+    Expected (preferred) headers in CareStatements tab:
+      - enabled: true/false (optional; if missing, rows are treated as enabled)
+      - colour:  🔴 🟠 🟡 ⚪ 🟢   (or 'color'/'severity'/'emoji')
+      - type:    warning/watch/advisory/statement/other (or 'kind'/'bucket'/'alert_type')
+      - text:    the care statement (or 'care'/'care_text'/'statement'/'message')
+    """
+
+    def _get_first(r: dict, keys: List[str]) -> str:
+        for k in keys:
+            if k in r and str(r.get(k, "")).strip() != "":
+                return str(r.get(k, "")).strip()
+        return ""
+
     def enabled(r: dict) -> bool:
-        return str(r.get("enabled", "")).strip().lower() in ("true", "yes", "1", "y")
+        # If the sheet doesn't have an enabled column, default to enabled.
+        raw = _get_first(r, ["enabled", "active", "use"])
+        if raw == "":
+            return True
+        return raw.lower() in ("true", "yes", "1", "y", "on")
 
     def norm_colour(c: str) -> str:
         c = (c or "").strip().lower()
@@ -617,20 +638,32 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
             return "🟡"
         if c in ("⚪", "white"):
             return "⚪"
+        if c in ("🟢", "green"):
+            return "🟢"
         return ""
 
     want_type = (alert_type or "").strip().lower()
     want_colour = norm_colour((colour or "").strip())
 
+    def row_colour(r: dict) -> str:
+        return norm_colour(_get_first(r, ["colour", "color", "severity", "emoji"]))
+
+    def row_type(r: dict) -> str:
+        return _get_first(r, ["type", "alert_type", "kind", "bucket"]).strip().lower()
+
+    def row_text(r: dict) -> str:
+        return _get_first(r, ["text", "care", "care_text", "carestatement", "care_statement", "statement", "message"])
+
     def matches(r: dict, c_req: str, t_req: str) -> bool:
-        rc = norm_colour((r.get("colour") or "").strip())
-        rt = (r.get("type") or "").strip().lower()
+        rc = row_colour(r)
+        rt = row_type(r)
         if c_req and rc != c_req:
             return False
         if t_req and rt != t_req:
             return False
         return True
 
+    # Priority buckets (most specific -> least specific)
     buckets = [
         (want_colour, want_type),
         ("", want_type),
@@ -643,15 +676,25 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
             if not enabled(r):
                 continue
             if matches(r, bc, bt):
-                txt = (r.get("text") or "").strip()
+                txt = row_text(r).strip()
                 if txt:
                     return txt
     return ""
 
-
 def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str) -> List[str]:
+    """Return all unique matching care texts (used for Remix)."""
+
+    def _get_first(r: dict, keys: List[str]) -> str:
+        for k in keys:
+            if k in r and str(r.get(k, "")).strip() != "":
+                return str(r.get(k, "")).strip()
+        return ""
+
     def enabled(r: dict) -> bool:
-        return str(r.get("enabled", "")).strip().lower() in ("true", "yes", "1", "y")
+        raw = _get_first(r, ["enabled", "active", "use"])
+        if raw == "":
+            return True
+        return raw.lower() in ("true", "yes", "1", "y", "on")
 
     def norm_colour(c: str) -> str:
         c = (c or "").strip().lower()
@@ -663,14 +706,25 @@ def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str
             return "🟡"
         if c in ("⚪", "white"):
             return "⚪"
+        if c in ("🟢", "green"):
+            return "🟢"
         return ""
 
     want_type = (alert_type or "").strip().lower()
     want_colour = norm_colour((colour or "").strip())
 
+    def row_colour(r: dict) -> str:
+        return norm_colour(_get_first(r, ["colour", "color", "severity", "emoji"]))
+
+    def row_type(r: dict) -> str:
+        return _get_first(r, ["type", "alert_type", "kind", "bucket"]).strip().lower()
+
+    def row_text(r: dict) -> str:
+        return _get_first(r, ["text", "care", "care_text", "carestatement", "care_statement", "statement", "message"])
+
     def matches(r: dict, c_req: str, t_req: str) -> bool:
-        rc = norm_colour((r.get("colour") or "").strip())
-        rt = (r.get("type") or "").strip().lower()
+        rc = row_colour(r)
+        rt = row_type(r)
         if c_req and rc != c_req:
             return False
         if t_req and rt != t_req:
@@ -692,12 +746,11 @@ def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str
                 continue
             if not matches(r, bc, bt):
                 continue
-            txt = (r.get("text") or "").strip()
+            txt = row_text(r).strip()
             if txt and txt not in seen:
                 out.append(txt)
                 seen.add(txt)
     return out
-
 
 def pick_remixed_care_text(
     care_rows: List[dict],
