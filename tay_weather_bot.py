@@ -491,11 +491,14 @@ def normalize_alert_title(title: str) -> str:
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
-
 # =============================================================================
 # Environment Canada detail extraction
 # =============================================================================
 def _extract_details_lines_from_ec(official_url: str) -> List[str]:
+    """
+    Extracts short 'What' and 'When' lines from the official Environment Canada alert page.
+    Falls back to a short weather-related sentence if structured fields aren't found.
+    """
     official_url = (official_url or "").strip()
     if not official_url:
         return []
@@ -523,7 +526,6 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             return ""
         return s
 
-
     m_what = re.search(r"What:\s*(.+?)(?=\s+(When:|Where:|Additional information:))", text, re.IGNORECASE)
     m_when = re.search(r"When:\s*(.+?)(?=\s+(Where:|Additional information:)|$)", text, re.IGNORECASE)
 
@@ -540,6 +542,7 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
     if out:
         return out[:2]
 
+    # Fallback: pick the first decent weather-related sentence
     weather_keywords = (
         "snow", "snowfall", "squall", "rain", "freezing", "ice", "wind", "fog",
         "visibility", "blowing", "drifting", "thunder", "heat", "cold",
@@ -555,6 +558,48 @@ def _extract_details_lines_from_ec(official_url: str) -> List[str]:
             if candidate:
                 return [candidate.rstrip(".") + "."]
     return []
+
+
+def _extract_recommended_action_from_ec(official_url: str) -> str:
+    """
+    Pulls the 'Recommended action:' section from the official Environment Canada alert page, when present.
+    Returns a single string (empty if not found).
+    """
+    official_url = (official_url or "").strip()
+    if not official_url:
+        return ""
+
+    r = requests.get(official_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    raw = soup.get_text("\n")
+    lines = [ln.strip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln]
+    text = " ".join(lines)
+
+    def _clean_action(s: str) -> str:
+        s = re.sub(r"\s+", " ", (s or "")).strip()
+        if not s:
+            return ""
+        if "bookmarking your customized list" in s.lower():
+            return ""
+        if "share this page" in s.lower():
+            return ""
+        return s
+
+    # Common label on EC pages: "Recommended action:"
+    m = re.search(
+        r"(Recommended action[s]?:)\s*(.+?)(?=\s+(What:|When:|Where:|Additional information:|$))",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return ""
+
+    action = _clean_action(m.group(2))
+    action = action.strip("•-–— \t")
+    return action
 
 
 # =============================================================================
@@ -1259,7 +1304,7 @@ def ensure_rss_exists() -> None:
     channel = ET.SubElement(rss, "channel")
 
     ET.SubElement(channel, "title").text = "Tay Township Weather Statements"
-    ET.SubElement(channel, "link").text = "https://weatherpresenter.github.io/tay-weather-rss/"
+    ET.SubElement(channel, "link").text = "https://commsconnect.github.io/tay-weather-rss/"
     ET.SubElement(channel, "description").text = "Automated weather statements and alerts for Tay Township area."
     ET.SubElement(channel, "language").text = "en-ca"
 
@@ -1366,7 +1411,8 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     official = (entry.get("link") or "").strip()
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
 
-    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
+    # ✅ Change: emoji + space only (no " - ")
+    title_line = f"{sev} {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
     try:
@@ -1375,7 +1421,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
         print(f"⚠️ EC details parse failed (X): {e}")
 
     parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
-    text_max = "\n".join([p for p in parts_max if p])
+    text_max = "\n".join(parts_max).strip()
 
     # Try full
     if len(text_max) <= 280:
@@ -1388,7 +1434,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     # Try medium (1 details line)
     if details_lines:
         parts_med = [title_line, "", details_lines[0], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
-        text_med = "\n".join([p for p in parts_med if p])
+        text_med = "\n".join(parts_med).strip()
         if len(text_med) <= 280:
             if custom_x.strip():
                 cand = text_med + "\n\n" + custom_x.strip()
@@ -1398,7 +1444,7 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
 
     # Minimal
     parts_min = [title_line, "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
-    text_min = "\n".join([p for p in parts_min if p])
+    text_min = "\n".join(parts_min).strip()
     if len(text_min) <= 280:
         if custom_x.strip():
             cand = text_min + "\n\n" + custom_x.strip()
@@ -1410,11 +1456,19 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
 
 
 def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, custom_fb: str = "") -> str:
+    """
+    Facebook SHOULD include:
+      - Details lines (What/When)
+      - Recommended action (when present on EC page)
+      - Care statement (from Google Sheets) when available
+    """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
 
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
-    title_line = f"{sev} - {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
+
+    # ✅ Change: emoji + space only (no " - ")
+    title_line = f"{sev} {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
     try:
@@ -1422,11 +1476,26 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     except Exception as e:
         print(f"⚠️ EC details parse failed (FB): {e}")
 
+    recommended_action = ""
+    try:
+        # Uses the extractor you already have in the EC section above
+        recommended_action = _extract_recommended_action_from_ec(official)
+    except Exception as e:
+        print(f"⚠️ EC recommended action parse failed (FB): {e}")
+
     parts: List[str] = []
     parts.append(title_line)
     parts.append("")
     parts.extend(details_lines[:3])
 
+    # ✅ Insert Recommended action BEFORE care statement (if present)
+    if recommended_action:
+        parts.append("")
+        parts.append("Recommended action:")
+        ra = recommended_action.strip().rstrip(".")
+        parts.append(f"• {ra}.")
+
+    # ✅ Care statement appended for Facebook (from Google Sheets)
     if care:
         parts.append("")
         parts.append(care.strip())
@@ -1440,7 +1509,12 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append(f"More: {more_url}")
     parts.append("#TayTownship #ONStorm")
 
-    return "\n".join([p for p in parts if p])
+    print(
+        f"FB build: action={'yes' if bool(recommended_action) else 'no'}, "
+        f"care={'yes' if bool(care) else 'no'}"
+    )
+
+    return "\n".join(parts).strip()
 
 
 # =============================================================================
@@ -1781,8 +1855,8 @@ def main() -> None:
             continue
 
         title_raw = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
-        type_label = classify_alert_kind(title_raw)  # type bucket
-        sev = severity_emoji(title_raw)              # ✅ unchanged emoji behaviour
+        type_label = classify_alert_kind(title_raw)  # type bucket (warning/watch/advisory/...)
+        sev = severity_emoji(title_raw)
 
         care = ""
         if care_rows:
@@ -1804,7 +1878,7 @@ def main() -> None:
             drive_svc=drive_svc,
             drive_folder_id=drive_folder_id,
             alert_kind=alert_kind,
-            alert_type_label=type_label,
+            alert_type_label=title_raw,  # <-- pass full alert title so "wind" can be detected
             severity=sev,
         )
 
