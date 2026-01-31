@@ -1,5 +1,218 @@
 {
-  "seen_ids": [],
+  "approval_decisions": {
+    "0591fec506": {
+      "decided_at": "2026-01-29T06:01:07Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "0e99c29fc0": {
+      "decided_at": "2026-01-22T03:17:56Z",
+      "decision": "denied"
+    },
+    "0f9ec17139": {
+      "decided_at": "2026-01-24T10:45:18Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "1192ada25c": {
+      "decided_at": "2026-01-24T16:25:40Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "11cec70d44": {
+      "decided_at": "2026-01-24T01:44:20Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "12a25674c4": {
+      "decided_at": "2026-01-22T10:28:08Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "1442bb5761": {
+      "decided_at": "2026-01-11T13:47:13Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "190cd1f1d2": {
+      "decided_at": "2026-01-31T18:48:05Z",
+      "decision": "approved"
+    },
+    "1952826edb": {
+      "decided_at": "2026-01-13T04:02:11Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "1ed41726de": {
+      "decided_at": "2026-01-29T16:43:46Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "29429e0ad1": {
+      "decided_at": "2026-01-27T09:48:09Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "2d08d0d810": {
+      "decided_at": "2026-01-20T22:23:29Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "3d87133fee": {
+      "decided_at": "2026-01-24T10:45:18Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "42f5cba59f": {
+      "decided_at": "2026-01-05T01:15:27Z",
+      "decision": "approved"
+    },
+    "464fd9d051": {
+      "decided_at": "2026-01-10T02:08:17Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "5cc5a101cc": {
+      "decided_at": "2026-01-23T17:38:25Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "5d7e7e4795": {
+      "decided_at": "2026-01-10T02:08:17Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "5dbea403ad": {
+      "decided_at": "2026-01-13T04:03:16Z",
+      "decision": "approved"
+    },
+    "5fd27bf529": {
+      "decided_at": "2026-01-24T05:55:46Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "64e5de7e4a": {
+      "decided_at": "2026-01-23T15:41:55Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "6d50a87665": {
+      "decided_at": "2026-01-22T03:16:25Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "7783e82c2d": {
+      "decided_at": "2026-01-30T15:58:40Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "7866bc2522": {
+      "decided_at": "2026-01-24T10:45:18Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "7c50812dbd": {
+      "decided_at": "2026-01-22T03:19:03Z",
+      "decision": "denied"
+    },
+    "8a7345cd7a": {
+      "decided_at": "2026-01-05T19:01:12Z",
+      "decision": "approved"
+    },
+    "954b3706b6": {
+      "decided_at": "2026-01-31T18:46:55Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "989cc8df02": {
+      "decided_at": "2026-01-19T14:28:10Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "9d477bc408": {
+      "decided_at": "2026-01-10T02:08:17Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "9e9b11f786": {
+      "decided_at": "2026-01-10T02:09:57Z",
+      "decision": "denied"
+    },
+    "a06ba52f6e": {
+      "decided_at": "2026-01-23T23:22:14Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "b508f704e0": {
+      "decided_at": "2026-01-24T05:55:46Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "b9edf1b1b4": {
+      "decided_at": "2026-01-22T22:48:48Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "babfb46834": {
+      "decided_at": "2026-01-10T02:08:17Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "bc8dcfa013": {
+      "decided_at": "2026-01-10T02:11:24Z",
+      "decision": "approved"
+    },
+    "d1d34d2c8b": {
+      "decided_at": "2026-01-10T02:08:17Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "d2900df545": {
+      "decided_at": "2026-01-24T01:44:20Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "d392e334d4": {
+      "decided_at": "2026-01-20T10:28:44Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "d7906e23df": {
+      "decided_at": "2026-01-19T23:20:57Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "e46c1bc571": {
+      "decided_at": "2026-01-28T21:45:34Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "e4f6fd9501": {
+      "decided_at": "2026-01-23T09:44:27Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "f240cc867b": {
+      "decided_at": "2026-01-18T23:41:23Z",
+      "decision": "denied",
+      "reason": "expired"
+    },
+    "f7389f0608": {
+      "decided_at": "2026-01-24T05:55:46Z",
+      "decision": "denied",
+      "reason": "expired"
+    }
+  },
+  "cooldowns": {
+    "866d4b18ba96a1c34a11e85b6bb6e6d42db38d39": 1768779736,
+    "8cba3a1a17596318031764df06a0b1df5e042d7f": 1769791959,
+    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768139486,
+    "ff0a63ffc349e53f3fb9c78829f24316ddbb29d5": 1768774873
+  },
+  "fb_cooldown_until": "2026-01-31T19:48:10.157970Z",
+  "fb_last_posted_at": "2026-01-31T18:48:10.157970Z",
+  "global_last_post_ts": 1769791959,
+  "pending_approvals": {},
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260128211913",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260105094547",
@@ -88,232 +301,19 @@
     "f7e5245b5f1379ee88a1df8358ae261b89488de4",
     "c02eeb2bb5f147cf2d41ddba302a71f90b0a9486"
   ],
-  "cooldowns": {
-    "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768139486,
-    "8cba3a1a17596318031764df06a0b1df5e042d7f": 1769791959,
-    "ff0a63ffc349e53f3fb9c78829f24316ddbb29d5": 1768774873,
-    "866d4b18ba96a1c34a11e85b6bb6e6d42db38d39": 1768779736
-  },
-  "global_last_post_ts": 1769791959,
-  "pending_approvals": {
-    "954b3706b6": {
-      "created_at": "2026-01-30T15:58:41Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - COLD ----- X (will post) -----\n\ud83d\udfe1 - COLD warning in Tay Township\nWind chills of minus 25 to minus 30.\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 - COLD warning in Tay Township\nWind chills of minus 25 to minus 30.\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 255,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-01-30T15:58:41Z"
-    }
-  },
-  "approval_decisions": {
-    "42f5cba59f": {
-      "decision": "approved",
-      "decided_at": "2026-01-05T01:15:27Z"
-    },
-    "8a7345cd7a": {
-      "decision": "approved",
-      "decided_at": "2026-01-05T19:01:12Z"
-    },
-    "9d477bc408": {
-      "decision": "denied",
-      "decided_at": "2026-01-10T02:08:17Z",
-      "reason": "expired"
-    },
-    "464fd9d051": {
-      "decision": "denied",
-      "decided_at": "2026-01-10T02:08:17Z",
-      "reason": "expired"
-    },
-    "5d7e7e4795": {
-      "decision": "denied",
-      "decided_at": "2026-01-10T02:08:17Z",
-      "reason": "expired"
-    },
-    "babfb46834": {
-      "decision": "denied",
-      "decided_at": "2026-01-10T02:08:17Z",
-      "reason": "expired"
-    },
-    "d1d34d2c8b": {
-      "decision": "denied",
-      "decided_at": "2026-01-10T02:08:17Z",
-      "reason": "expired"
-    },
-    "9e9b11f786": {
-      "decision": "denied",
-      "decided_at": "2026-01-10T02:09:57Z"
-    },
-    "bc8dcfa013": {
-      "decision": "approved",
-      "decided_at": "2026-01-10T02:11:24Z"
-    },
-    "1442bb5761": {
-      "decision": "denied",
-      "decided_at": "2026-01-11T13:47:13Z",
-      "reason": "expired"
-    },
-    "1952826edb": {
-      "decision": "denied",
-      "decided_at": "2026-01-13T04:02:11Z",
-      "reason": "expired"
-    },
-    "5dbea403ad": {
-      "decision": "approved",
-      "decided_at": "2026-01-13T04:03:16Z"
-    },
-    "f240cc867b": {
-      "decision": "denied",
-      "decided_at": "2026-01-18T23:41:23Z",
-      "reason": "expired"
-    },
-    "989cc8df02": {
-      "decision": "denied",
-      "decided_at": "2026-01-19T14:28:10Z",
-      "reason": "expired"
-    },
-    "d7906e23df": {
-      "decision": "denied",
-      "decided_at": "2026-01-19T23:20:57Z",
-      "reason": "expired"
-    },
-    "d392e334d4": {
-      "decision": "denied",
-      "decided_at": "2026-01-20T10:28:44Z",
-      "reason": "expired"
-    },
-    "2d08d0d810": {
-      "decision": "denied",
-      "decided_at": "2026-01-20T22:23:29Z",
-      "reason": "expired"
-    },
-    "6d50a87665": {
-      "decision": "denied",
-      "decided_at": "2026-01-22T03:16:25Z",
-      "reason": "expired"
-    },
-    "0e99c29fc0": {
-      "decision": "denied",
-      "decided_at": "2026-01-22T03:17:56Z"
-    },
-    "7c50812dbd": {
-      "decision": "denied",
-      "decided_at": "2026-01-22T03:19:03Z"
-    },
-    "12a25674c4": {
-      "decision": "denied",
-      "decided_at": "2026-01-22T10:28:08Z",
-      "reason": "expired"
-    },
-    "b9edf1b1b4": {
-      "decision": "denied",
-      "decided_at": "2026-01-22T22:48:48Z",
-      "reason": "expired"
-    },
-    "e4f6fd9501": {
-      "decision": "denied",
-      "decided_at": "2026-01-23T09:44:27Z",
-      "reason": "expired"
-    },
-    "64e5de7e4a": {
-      "decision": "denied",
-      "decided_at": "2026-01-23T15:41:55Z",
-      "reason": "expired"
-    },
-    "5cc5a101cc": {
-      "decision": "denied",
-      "decided_at": "2026-01-23T17:38:25Z",
-      "reason": "expired"
-    },
-    "a06ba52f6e": {
-      "decision": "denied",
-      "decided_at": "2026-01-23T23:22:14Z",
-      "reason": "expired"
-    },
-    "11cec70d44": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T01:44:20Z",
-      "reason": "expired"
-    },
-    "d2900df545": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T01:44:20Z",
-      "reason": "expired"
-    },
-    "5fd27bf529": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T05:55:46Z",
-      "reason": "expired"
-    },
-    "f7389f0608": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T05:55:46Z",
-      "reason": "expired"
-    },
-    "b508f704e0": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T05:55:46Z",
-      "reason": "expired"
-    },
-    "3d87133fee": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T10:45:18Z",
-      "reason": "expired"
-    },
-    "7866bc2522": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T10:45:18Z",
-      "reason": "expired"
-    },
-    "0f9ec17139": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T10:45:18Z",
-      "reason": "expired"
-    },
-    "1192ada25c": {
-      "decision": "denied",
-      "decided_at": "2026-01-24T16:25:40Z",
-      "reason": "expired"
-    },
-    "29429e0ad1": {
-      "decision": "denied",
-      "decided_at": "2026-01-27T09:48:09Z",
-      "reason": "expired"
-    },
-    "e46c1bc571": {
-      "decision": "denied",
-      "decided_at": "2026-01-28T21:45:34Z",
-      "reason": "expired"
-    },
-    "0591fec506": {
-      "decision": "denied",
-      "decided_at": "2026-01-29T06:01:07Z",
-      "reason": "expired"
-    },
-    "1ed41726de": {
-      "decision": "denied",
-      "decided_at": "2026-01-29T16:43:46Z",
-      "reason": "expired"
-    },
-    "7783e82c2d": {
-      "decision": "denied",
-      "decided_at": "2026-01-30T15:58:40Z",
-      "reason": "expired"
-    }
-  },
-  "telegram_last_update_id": 259933373,
-  "telegram_last_signal": {
-    "token": "8a7345cd7a",
-    "decision": "approved",
-    "decided_at": "2026-01-05T19:01:12Z"
-  },
-  "test_gate_token": "7c50812dbd",
-  "fb_last_posted_at": "2026-01-30T16:52:07.391834Z",
-  "fb_cooldown_until": "2026-01-30T17:52:07.391834Z",
+  "seen_ids": [],
+  "telegram_custom_pending": null,
+  "telegram_custom_text": {},
+  "telegram_last_reminder_at": {},
   "telegram_last_remix_seen": {},
+  "telegram_last_signal": {
+    "decided_at": "2026-01-05T19:01:12Z",
+    "decision": "approved",
+    "token": "8a7345cd7a"
+  },
+  "telegram_last_update_id": 259933383,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "telegram_custom_pending": null,
-  "telegram_custom_text": {},
-  "telegram_last_reminder_at": {}
+  "test_gate_token": "190cd1f1d2"
 }
