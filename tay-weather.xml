@@ -6,7 +6,10 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260131092133</guid><pubDate>Sat, 31 Jan 2026 09:21:33 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
+<item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260131161423</guid><pubDate>Sat, 31 Jan 2026 16:14:23 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
+Issued: 11:14 AM EST Saturday 31 January 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260131092133</guid><pubDate>Sat, 31 Jan 2026 09:21:33 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
 Issued: 4:21 AM EST Saturday 31 January 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260131012219</guid><pubDate>Sat, 31 Jan 2026 01:22:19 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
@@ -78,8 +81,5 @@ More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260124035404</guid><pubDate>Sat, 24 Jan 2026 03:54:04 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
 Issued: 10:54 PM EST Friday 23 January 2026
 More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL (Tay Township area)</title><link>https://weatherpresenter.github.io/tay-weather-rss/tay/</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260123232553</guid><pubDate>Fri, 23 Jan 2026 23:25:53 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL (Tay Township area)
-Issued: 6:25 PM EST Friday 23 January 2026
-More info (Tay Township): https://weatherpresenter.github.io/tay-weather-rss/tay/
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
