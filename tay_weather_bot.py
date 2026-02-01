@@ -1403,15 +1403,14 @@ def _pretty_title_for_social(title: str) -> str:
 
 def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
     """
-    X SHOULD NOT INCLUDE CARE STATEMENTS.
-    - We ignore `care` entirely for X.
-    - We allow optional `custom_x` (manual add-on) only if it fits within 280 chars.
+    X post builder with character limit handling.
+    Logic: Include 'care' statement only if it fits within 280 chars 
+    and no custom text is provided.
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
 
-    # ✅ Change: emoji + space only (no " - ")
     title_line = f"{sev} {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
@@ -1420,38 +1419,46 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
-    parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
-    text_max = "\n".join(parts_max).strip()
-
-    # Try full
-    if len(text_max) <= 280:
+    # Helper function to try and append extra text (custom or care) to a base text
+    def try_append_extras(base_text: str) -> str:
+        # 1. Try Custom Text first (manual entry always wins)
         if custom_x.strip():
-            cand = text_max + "\n\n" + custom_x.strip()
+            cand = base_text + "\n\n" + custom_x.strip()
             if len(cand) <= 280:
                 return cand
-        return text_max
+        # 2. Try Care Statement (automatic fallback)
+        elif care.strip():
+            cand = base_text + "\n\n" + care.strip()
+            if len(cand) <= 280:
+                return cand
+        return base_text
 
-    # Try medium (1 details line)
+    # --- VERSION 1: MAX (2 details lines) ---
+    parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
+    text_max = "\n".join(parts_max).strip()
+    if len(text_max) <= 280:
+        final_max = try_append_extras(text_max)
+        if len(final_max) <= 280:
+            return final_max
+
+    # --- VERSION 2: MEDIUM (1 details line) ---
     if details_lines:
         parts_med = [title_line, "", details_lines[0], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
         text_med = "\n".join(parts_med).strip()
         if len(text_med) <= 280:
-            if custom_x.strip():
-                cand = text_med + "\n\n" + custom_x.strip()
-                if len(cand) <= 280:
-                    return cand
-            return text_med
+            final_med = try_append_extras(text_med)
+            if len(final_med) <= 280:
+                return final_med
 
-    # Minimal
+    # --- VERSION 3: MINIMAL (No details) ---
     parts_min = [title_line, "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_min = "\n".join(parts_min).strip()
     if len(text_min) <= 280:
-        if custom_x.strip():
-            cand = text_min + "\n\n" + custom_x.strip()
-            if len(cand) <= 280:
-                return cand
-        return text_min
+        final_min = try_append_extras(text_min)
+        if len(final_min) <= 280:
+            return final_min
 
+    # ABSOLUTE FALLBACK: Truncate minimal if even that is too long
     return text_min[:277].rstrip() + "..."
 
 
@@ -1460,14 +1467,13 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     Facebook SHOULD include:
       - Details lines (What/When)
       - Recommended action (when present on EC page)
-      - Care statement (from Google Sheets) when available
+      - OR Care statement (from Google Sheets) IF no recommended action is found
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
 
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
 
-    # ✅ Change: emoji + space only (no " - ")
     title_line = f"{sev} {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
@@ -1478,7 +1484,6 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
 
     recommended_action = ""
     try:
-        # Uses the extractor you already have in the EC section above
         recommended_action = _extract_recommended_action_from_ec(official)
     except Exception as e:
         print(f"⚠️ EC recommended action parse failed (FB): {e}")
@@ -1488,17 +1493,20 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("")
     parts.extend(details_lines[:3])
 
-    # ✅ Insert Recommended action BEFORE care statement (if present)
+    # --- THE MODIFIED LOGIC START ---
+    
     if recommended_action:
+        # If we have an official action from Weather Canada, use it
         parts.append("")
         parts.append("Recommended action:")
         ra = recommended_action.strip().rstrip(".")
         parts.append(f"• {ra}.")
-
-    # ✅ Care statement appended for Facebook (from Google Sheets)
-    if care:
+    elif care:
+        # ONLY if there's NO recommended_action, we add the care statement
         parts.append("")
         parts.append(care.strip())
+        
+    # --- THE MODIFIED LOGIC END ---
 
     if custom_fb.strip():
         parts.append("")
@@ -1511,11 +1519,11 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
 
     print(
         f"FB build: action={'yes' if bool(recommended_action) else 'no'}, "
-        f"care={'yes' if bool(care) else 'no'}"
+        f"care_applied={'yes' if (not recommended_action and care) else 'no'}"
     )
 
     return "\n".join(parts).strip()
-
+    
 
 # =============================================================================
 # Image selection policy
