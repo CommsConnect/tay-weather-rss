@@ -2,55 +2,13 @@ name: Update Tay weather RSS
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
-      run_mode:
-        description: "Run mode"
-        required: true
-        default: "live"
-        type: choice
-        options:
-          - "live"
-          - "test_telegram_buttons_no_post"   # sends Telegram preview + buttons, never posts
-          - "test_sample_alert_no_post"       # fake alert title, sends Telegram preview + buttons, never posts
-
-      test_alert_title:
-        description: "Fake EC title (only used for test_sample_alert_no_post)"
-        required: false
-        default: "Yellow Warning - Snowfall"
-        type: choice
-        options:
-          - "Yellow Warning - Snowfall"
-          - "Orange Warning - Snow squalls"
-          - "Red Warning - Blizzard"
-          - "Yellow Advisory - Freezing rain"
-          - "Orange Warning - Wind"
-          - "Yellow Advisory - Fog"
-          - "Orange Warning - Heat"
-          - "Red Warning - Cold"
-
-      # --- Keep your existing toggles (backward compatibility) ---
-      test_x:
-        description: "Post a TEST update to X (bypasses alert feed + cooldown/dedupe)"
+      test_tweet:
+        description: "Post a test update (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
-        type: choice
-        options: ["false", "true"]
-
-      test_facebook:
-        description: "Post a TEST update to Facebook (bypasses alert feed + cooldown/dedupe)"
-        required: false
-        default: "false"
-        type: choice
-        options: ["false", "true"]
-
-      post_facebook:
-        description: "Allow REAL Facebook posting on this manual run (normal alert flow)"
-        required: false
-        default: "false"
-        type: choice
-        options: ["false", "true"]
 
 concurrency:
   group: tay-weather-rss
@@ -58,60 +16,28 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write # needed for google-github-actions/auth via WIF
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    env:
-      # -------------------------------------------------------------------
-      # IMPORTANT:
-      # These are "defaults". We will OVERRIDE them per-run in a later step
-      # ("Resolve posting toggles") using $GITHUB_ENV.
-      # -------------------------------------------------------------------
-      ENABLE_X_POSTING: "true"
-      ENABLE_FB_POSTING: "true"
-
-      # --- Manual run mode controls ---
-      RUN_MODE: ${{ github.event.inputs.run_mode || 'live' }}
-      TEST_ALERT_TITLE: ${{ github.event.inputs.test_alert_title || '' }}
-
-      # --- Test flags (per platform) ---
-      TEST_X: ${{ github.event.inputs.test_x || 'false' }}
-      TEST_FACEBOOK: ${{ github.event.inputs.test_facebook || 'false' }}
-
-      # Manual allow-real-FB toggle (used by resolver step below)
-      POST_FACEBOOK: ${{ github.event.inputs.post_facebook || 'false' }}
-
-      # Optional backward compatibility (safe to remove later)
-      TEST_TWEET: ${{ github.event.inputs.test_x || 'false' }}
-
-      # --- Feeds & images ---
-      ALERT_FEED_URL: https://weather.gc.ca/rss/battleboard/onrm94_e.xml
-      TAY_COORDS_URL: https://tayweather.short.gy/alert
-      TAY_ALERTS_URL: https://tayweather.short.gy/alert
-      CR29_NORTH_IMAGE_URL: https://511on.ca/map/Cctv/400
-      CR29_SOUTH_IMAGE_URL: https://511on.ca/map/Cctv/402
-
-      # --- Content config ---
-      CONTENT_CONFIG_SOURCE: auto
-      CONTENT_CONFIG_XLSX: content_config.xlsx
-
-      # --- Facebook safety ---
-      FB_COOLDOWN_SECONDS: "3600"      # 1 hour between successful FB posts
-      FB_BLOCK_SECONDS: "21600"        # 6 hours if rate-limited
-      FB_JITTER_SECONDS: "10"          # small randomness to avoid burst detection
-
-      # --- Telegram approval gate ---
-      TELEGRAM_ENABLE_GATE: "true"
-      TELEGRAM_PREVIEW_DELAY_MIN: "10"
+    timeout-minutes: 3
 
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+
+      # ✅ Google auth (Workload Identity Federation)
+      - name: Authenticate to Google (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets.readonly
+          create_credentials_file: true
+          export_environment_variables: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -123,156 +49,50 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # -------------------------------------------------------------------
-      # Resolve final posting toggles based on RUN_MODE + inputs
-      # -------------------------------------------------------------------
-      - name: Resolve posting toggles
-        shell: bash
-        run: |
-          # -------------------------------------------------------------------
-          # This step is the single source of truth for whether we are allowed
-          # to post to X / Facebook on THIS run.
-          #
-          # Why: job-level env is static, but RUN_MODE and inputs need to
-          #      dynamically gate actual posting (especially for test_*_no_post).
-          #
-          # Rule summary:
-          #   - test_telegram_buttons_no_post  => Telegram preview/buttons ONLY, NEVER post
-          #   - test_sample_alert_no_post      => Fake alert, Telegram preview/buttons ONLY, NEVER post
-          #   - live (schedule)                => normal posting allowed
-          #   - live (manual)                  => FB posting only if POST_FACEBOOK=true (unless TEST_FACEBOOK=true)
-          #   - TEST_X / TEST_FACEBOOK         => keeps your existing per-platform test posts
-          # -------------------------------------------------------------------
-
-          echo "RUN_MODE=$RUN_MODE"
-          echo "TEST_X=$TEST_X"
-          echo "TEST_FACEBOOK=$TEST_FACEBOOK"
-          echo "POST_FACEBOOK=$POST_FACEBOOK"
-          echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
-
-          # Default: allow X and FB (matches your current behavior)
-          ENABLE_X="true"
-          ENABLE_FB="true"
-
-          # Hard stop for "no_post" modes (this is the key feature you wanted)
-          if [ "$RUN_MODE" = "test_telegram_buttons_no_post" ] || [ "$RUN_MODE" = "test_sample_alert_no_post" ]; then
-            ENABLE_X="false"
-            ENABLE_FB="false"
-          else
-            # Live modes:
-            #
-            # X: allowed by default (you currently keep it always on)
-            #     TEST_X will still work because the bot can look at TEST_X too.
-            ENABLE_X="true"
-
-            # FB: scheduled runs can post; manual runs require POST_FACEBOOK=true unless TEST_FACEBOOK=true
-            if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-              if [ "$TEST_FACEBOOK" = "true" ]; then
-                ENABLE_FB="true"
-              else
-                # Real FB posting only if you explicitly allow it on manual runs
-                if [ "$POST_FACEBOOK" = "true" ]; then
-                  ENABLE_FB="true"
-                else
-                  ENABLE_FB="false"
-                fi
-              fi
-            else
-              # schedule (or other non-manual): keep enabled
-              ENABLE_FB="true"
-            fi
-          fi
-
-          # Export final flags for downstream steps (overrides job env)
-          echo "ENABLE_X_POSTING=$ENABLE_X" >> "$GITHUB_ENV"
-          echo "ENABLE_FB_POSTING=$ENABLE_FB" >> "$GITHUB_ENV"
-
-          echo "Final: ENABLE_X_POSTING=$ENABLE_X"
-          echo "Final: ENABLE_FB_POSTING=$ENABLE_FB"
-
       - name: Sanity check config (non-secret)
-        env:
-          # Presence-only checks so this step prints set/missing correctly
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         run: |
-          echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
-          echo "RUN_MODE=$RUN_MODE"
-          echo "ENABLE_X_POSTING=$ENABLE_X_POSTING"
-          echo "ENABLE_FB_POSTING=$ENABLE_FB_POSTING"
-          echo "TEST_X=$TEST_X"
-          echo "TEST_FACEBOOK=$TEST_FACEBOOK"
-          echo "POST_FACEBOOK=$POST_FACEBOOK"
-          echo "TAY_ALERTS_URL=$TAY_ALERTS_URL"
-          echo "CONTENT_CONFIG_SOURCE=$CONTENT_CONFIG_SOURCE"
-          echo "CONTENT_CONFIG_XLSX=$CONTENT_CONFIG_XLSX"
-          if [ -n "$GOOGLE_SHEET_ID" ]; then echo "GOOGLE_SHEET_ID=set"; else echo "GOOGLE_SHEET_ID=missing"; fi
-          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then echo "GOOGLE_SERVICE_ACCOUNT_JSON=set"; else echo "GOOGLE_SERVICE_ACCOUNT_JSON=missing"; fi
-          if [ -n "$GOOGLE_DRIVE_FOLDER_ID" ]; then echo "GOOGLE_DRIVE_FOLDER_ID=set"; else echo "GOOGLE_DRIVE_FOLDER_ID=missing"; fi
-
-      - name: Verify required secrets (only what we actually need this run)
+          echo "ENABLE_X_POSTING=${ENABLE_X_POSTING}"
+          echo "ENABLE_FB_POSTING=${ENABLE_FB_POSTING}"
+          echo "TEST_TWEET=${TEST_TWEET}"
+          echo "CR29_NORTH_IMAGE_URL=${CR29_NORTH_IMAGE_URL}"
+          echo "CR29_SOUTH_IMAGE_URL=${CR29_SOUTH_IMAGE_URL}"
+          echo "CARE_SHEET_ID=${CARE_SHEET_ID}"
         env:
-          X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
-          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
-          X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          ENABLE_X_POSTING: "true"
+          ENABLE_FB_POSTING: "true"
+          TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
+          CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
+          CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
+          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID }}
 
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Sanity check required secrets (fails fast)
         run: |
           missing=0
 
-          # Only require X secrets if X is enabled this run
-          if [ "$ENABLE_X_POSTING" = "true" ]; then
-            for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
-              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-            done
+          # X OAuth2 (posting)
+          for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+          done
 
-            for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
-              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-            done
-          else
-            echo "X disabled for this run; skipping X secret checks."
-          fi
+          # X OAuth1 (media)
+          for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+          done
 
-          # Only require FB secrets if FB is enabled this run
-          if [ "$ENABLE_FB_POSTING" = "true" ]; then
-            for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
-              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-            done
-          else
-            echo "FB disabled for this run; skipping FB secret checks."
-          fi
+          # Facebook
+          for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+          done
 
-          # Only require Telegram secrets if Telegram gate is enabled
-          if [ "$TELEGRAM_ENABLE_GATE" = "true" ]; then
-            for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
-              if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
-            done
-          else
-            echo "Telegram gate disabled; skipping Telegram secret checks."
-          fi
+          # Care statements sheet (Facebook enhancement)
+          for k in CARE_SHEET_ID; do
+            if [ -z "${!k}" ]; then echo "Missing secret: $k (Facebook care statements will be skipped)"; fi
+          done
 
           if [ "$missing" -ne 0 ]; then
-            echo "One or more required secrets are missing."
+            echo "One or more required secrets are missing. Fix repo secrets and re-run."
             exit 1
           fi
-
-      # ------------------------------------------------------------
-      # Run the weather bot
-      # ------------------------------------------------------------
-      - name: Run weather bot
         env:
           X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
           X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
@@ -281,60 +101,68 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID }}
 
+      - name: Run weather bot (RSS + socials)
+        env:
+          ALERT_FEED_URL: "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
+
+          # ✅ Your new short URL default target
+          TAY_COORDS_URL: "https://tayweather.short.gy/alert"
+
+          # X OAuth 1.0a (required for media upload)
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+
+          # X OAuth 2.0 (required for posting tweets)
+          X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
+          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+          X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
+
+          # Facebook page posting
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
 
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          # Camera image URLs (repo variables)
+          CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
+          CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
 
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_APPROVAL_TTL_MIN: ${{ secrets.TELEGRAM_APPROVAL_TTL_MIN }}
+          # ✅ Care statements (Google Sheets)
+          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID }}
+          CARE_SHEET_TAB: "CareStatements"
+
+          # Toggles
+          TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
+          ENABLE_X_POSTING: "true"
+          ENABLE_FB_POSTING: "true"
+
         run: |
           python tay_weather_bot.py
 
-      # ------------------------------------------------------------
-      # Detect whether the X refresh token was rotated
-      # ------------------------------------------------------------
-      - name: Detect X refresh token rotation
-        id: xrot
+      - name: Update X_REFRESH_TOKEN secret if rotated
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_ACTIONS_SECRETS }}
         run: |
           if [ -f "x_refresh_token_rotated.txt" ]; then
-            echo "rotated=true" >> $GITHUB_OUTPUT
+            echo "Rotated X refresh token found. Updating repo secret X_REFRESH_TOKEN..."
+            NEW_TOKEN="$(cat x_refresh_token_rotated.txt)"
+            gh secret set X_REFRESH_TOKEN --body "$NEW_TOKEN" --repo "$GITHUB_REPOSITORY"
+            rm -f x_refresh_token_rotated.txt
           else
-            echo "rotated=false" >> $GITHUB_OUTPUT
+            echo "No rotated X refresh token to update."
           fi
 
-      # ------------------------------------------------------------
-      # Update the X_REFRESH_TOKEN repository secret (if rotated)
-      # ------------------------------------------------------------
-      - name: Update rotated X refresh token
-        if: steps.xrot.outputs.rotated == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          echo "Updating X_REFRESH_TOKEN secret..."
-          gh secret set X_REFRESH_TOKEN \
-            --body "$(cat x_refresh_token_rotated.txt)" \
-            --repo "$GITHUB_REPOSITORY"
-          echo "✓ Updated X_REFRESH_TOKEN secret"
-          rm -f x_refresh_token_rotated.txt
-
-      - name: No X refresh token rotation
-        if: steps.xrot.outputs.rotated == 'false'
-        run: |
-          echo "No rotated X refresh token."
-
-      # ------------------------------------------------------------
-      # Commit generated RSS feed and state file (if changed)
-      # ------------------------------------------------------------
-      - name: Commit RSS + state updates
+      - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add tay-weather.xml state.json || true
+
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
