@@ -5,26 +5,58 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
-      test_tweet:
-        description: "Post a test update (bypasses alert feed + cooldown/dedupe)"
-        required: false
-        default: "false"
-    
-      enable_x_posting:
-        description: "Enable X posting for this run (overrides default)"
-        required: false
-        default: "true"
-    
-      enable_fb_posting:
-        description: "Enable Facebook posting for this run (overrides default)"
-        required: false
-        default: "true"
-    
       run_mode:
-        description: "Run mode (leave blank for normal). Example: test_sample_alert_no_post"
+        description: "Run mode"
+        type: choice
+        required: true
+        default: live
+        options:
+          - live
+          - test_sample_alert_no_post
+          - test_telegram_buttons_no_post
+  
+      sample_alert:
+        description: "Sample alert to generate (only used in test_sample_alert_no_post)"
+        type: choice
         required: false
-        default: ""
-
+        default: orange_snowfall_warning
+        options:
+          - orange_snowfall_warning
+          - red_tornado_warning
+          - red_winter_storm_warning
+          - yellow_weather_advisory
+          - rainfall_warning
+          - wind_warning
+          - heat_warning
+          - special_weather_statement
+  
+      enable_x_posting:
+        description: "Enable X posting"
+        type: choice
+        required: true
+        default: "true"
+        options:
+          - "true"
+          - "false"
+  
+      enable_fb_posting:
+        description: "Enable Facebook posting"
+        type: choice
+        required: true
+        default: "true"
+        options:
+          - "true"
+          - "false"
+  
+      test_tweet:
+        description: "Force a test post (bypasses alert feed + cooldown/dedupe)"
+        type: choice
+        required: true
+        default: "false"
+        options:
+          - "false"
+          - "true"
+  
 
 concurrency:
   group: tay-weather-rss
@@ -75,10 +107,13 @@ jobs:
           echo "CR29_NORTH_IMAGE_URL=${CR29_NORTH_IMAGE_URL}"
           echo "CR29_SOUTH_IMAGE_URL=${CR29_SOUTH_IMAGE_URL}"
           echo "CARE_SHEET_ID=${CARE_SHEET_ID}"
+          echo "SAMPLE_ALERT=${SAMPLE_ALERT}"
+
         env:
           ENABLE_X_POSTING: ${{ github.event.inputs.enable_x_posting || 'true' }}
           ENABLE_FB_POSTING: ${{ github.event.inputs.enable_fb_posting || 'true' }}
-          RUN_MODE: ${{ github.event.inputs.run_mode || '' }}
+          RUN_MODE: ${{ github.event.inputs.run_mode || 'live' }}
+          SAMPLE_ALERT: ${{ github.event.inputs.sample_alert || '' }}
 
           TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
           CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
@@ -155,10 +190,13 @@ jobs:
           CARE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           CARE_SHEET_TAB: "CareStatements"
 
-          # Toggles
+          # Toggles / modes
+          RUN_MODE: ${{ github.event.inputs.run_mode || 'live' }}
+          SAMPLE_ALERT: ${{ github.event.inputs.sample_alert || '' }}
           TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
-          ENABLE_X_POSTING: "true"
-          ENABLE_FB_POSTING: "true"
+          ENABLE_X_POSTING: ${{ github.event.inputs.enable_x_posting || 'true' }}
+          ENABLE_FB_POSTING: ${{ github.event.inputs.enable_fb_posting || 'true' }}
+
 
         run: |
           python tay_weather_bot.py
