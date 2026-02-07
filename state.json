@@ -201,6 +201,15 @@
       "decided_at": "2026-01-24T05:55:46Z",
       "decision": "denied",
       "reason": "expired"
+    },
+    "964ebf591d": {
+      "decision": "denied",
+      "decided_at": "2026-02-07T13:43:42Z",
+      "reason": "expired"
+    },
+    "0c7c8a80fd": {
+      "decision": "approved",
+      "decided_at": "2026-02-07T13:44:12Z"
     }
   },
   "cooldowns": {
@@ -212,16 +221,7 @@
   "fb_cooldown_until": "2026-02-01T00:46:05.250763Z",
   "fb_last_posted_at": "2026-01-31T23:46:05.250763Z",
   "global_last_post_ts": 1769903191,
-  "pending_approvals": {
-    "964ebf591d": {
-      "created_at": "2026-01-31T23:22:49Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - COLD ----- X (will post) -----\n\ud83d\udfe1 COLD warning in Tay Township\n\nWind chills of minus 25 to minus 30.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 COLD warning in Tay Township\n\nWind chills of minus 25 to minus 30.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 264,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-01-31T23:22:49Z"
-    }
-  },
+  "pending_approvals": {},
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260131012219",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260110023025",
@@ -324,9 +324,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933383,
+  "telegram_last_update_id": 259933385,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "190cd1f1d2"
+  "test_gate_token": "0c7c8a80fd"
 }
