@@ -29,15 +29,17 @@ jobs:
         with:
           persist-credentials: true
 
-      # ✅ Google auth (Workload Identity Federation)
-      - name: Authenticate to Google (WIF)
+      # ✅ Google auth (Service Account JSON)
+      - name: Authenticate to Google (Service Account JSON)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          access_token_scopes: https://www.googleapis.com/auth/spreadsheets.readonly
+          credentials_json: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          access_token_scopes: >-
+            https://www.googleapis.com/auth/spreadsheets.readonly
+            https://www.googleapis.com/auth/drive.readonly
           create_credentials_file: true
           export_environment_variables: true
+
 
       - name: Set up Python
         uses: actions/setup-python@v5
