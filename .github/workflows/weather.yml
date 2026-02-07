@@ -9,6 +9,22 @@ on:
         description: "Post a test update (bypasses alert feed + cooldown/dedupe)"
         required: false
         default: "false"
+    
+      enable_x_posting:
+        description: "Enable X posting for this run (overrides default)"
+        required: false
+        default: "true"
+    
+      enable_fb_posting:
+        description: "Enable Facebook posting for this run (overrides default)"
+        required: false
+        default: "true"
+    
+      run_mode:
+        description: "Run mode (leave blank for normal). Example: test_sample_alert_no_post"
+        required: false
+        default: ""
+
 
 concurrency:
   group: tay-weather-rss
@@ -60,12 +76,14 @@ jobs:
           echo "CR29_SOUTH_IMAGE_URL=${CR29_SOUTH_IMAGE_URL}"
           echo "CARE_SHEET_ID=${CARE_SHEET_ID}"
         env:
-          ENABLE_X_POSTING: "true"
-          ENABLE_FB_POSTING: "true"
+          ENABLE_X_POSTING: ${{ github.event.inputs.enable_x_posting || 'true' }}
+          ENABLE_FB_POSTING: ${{ github.event.inputs.enable_fb_posting || 'true' }}
+          RUN_MODE: ${{ github.event.inputs.run_mode || '' }}
+
           TEST_TWEET: ${{ github.event.inputs.test_tweet || 'false' }}
           CR29_NORTH_IMAGE_URL: ${{ vars.CR29_NORTH_IMAGE_URL }}
           CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
-          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID }}
+          CARE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
       - name: Sanity check required secrets (fails fast)
         run: |
@@ -105,7 +123,7 @@ jobs:
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID }}
+          CARE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
       - name: Run weather bot (RSS + socials)
         env:
@@ -134,7 +152,7 @@ jobs:
           CR29_SOUTH_IMAGE_URL: ${{ vars.CR29_SOUTH_IMAGE_URL }}
 
           # ✅ Care statements (Google Sheets)
-          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID }}
+          CARE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           CARE_SHEET_TAB: "CareStatements"
 
           # Toggles
