@@ -123,46 +123,124 @@ jobs:
       - name: Sanity check required secrets (fails fast)
         run: |
           missing=0
-
-          # X OAuth2 (posting)
+  
+          echo ""
+          echo "🔍 Validating required secrets and configuration..."
+          echo ""
+  
+          # -------------------------------------------------------------------
+          # X (Twitter) OAuth 2.0 — posting tweets
+          # Location:
+          #   Repo → Settings → Secrets and variables → Actions → Secrets
+          # Required when ENABLE_X_POSTING=true
+          # -------------------------------------------------------------------
           for k in X_CLIENT_ID X_CLIENT_SECRET X_REFRESH_TOKEN; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            if [ -z "${!k}" ]; then
+              echo "❌ Missing X OAuth2 secret: $k"
+              echo "   → Fix at: Repo Settings → Secrets and variables → Actions → Secrets"
+              missing=1
+            fi
           done
-
-          # X OAuth1 (media)
+  
+          # -------------------------------------------------------------------
+          # X (Twitter) OAuth 1.0a — media uploads (images)
+          # Location:
+          #   Repo → Settings → Secrets and variables → Actions → Secrets
+          # Required for any tweet with images
+          # -------------------------------------------------------------------
           for k in X_API_KEY X_API_SECRET X_ACCESS_TOKEN X_ACCESS_TOKEN_SECRET; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            if [ -z "${!k}" ]; then
+              echo "❌ Missing X media secret: $k"
+              echo "   → Fix at: Repo Settings → Secrets and variables → Actions → Secrets"
+              missing=1
+            fi
           done
-
-          # Facebook
+  
+          # -------------------------------------------------------------------
+          # Facebook Page posting
+          # Location:
+          #   Repo → Settings → Secrets and variables → Actions → Secrets
+          # Required when ENABLE_FB_POSTING=true
+          # -------------------------------------------------------------------
           for k in FB_PAGE_ID FB_PAGE_ACCESS_TOKEN; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k"; missing=1; fi
+            if [ -z "${!k}" ]; then
+              echo "❌ Missing Facebook secret: $k"
+              echo "   → Fix at: Repo Settings → Secrets and variables → Actions → Secrets"
+              missing=1
+            fi
           done
-
-          # Care statements sheet (Facebook enhancement)
-          for k in CARE_SHEET_ID; do
-            if [ -z "${!k}" ]; then echo "Missing secret: $k (Facebook care statements will be skipped)"; fi
+  
+          # -------------------------------------------------------------------
+          # Telegram approval gate
+          # Location:
+          #   Repo → Settings → Secrets and variables → Actions → Secrets
+          # Required for:
+          #   - test_telegram_buttons_no_post
+          #   - any run that sends previews for approval
+          # -------------------------------------------------------------------
+          for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+            if [ -z "${!k}" ]; then
+              echo "❌ Missing Telegram secret: $k"
+              echo "   → Fix at: Repo Settings → Secrets and variables → Actions → Secrets"
+              echo "   → Telegram gate cannot function without this"
+              missing=1
+            fi
           done
-
+  
+          # -------------------------------------------------------------------
+          # Care statements Google Sheet
+          # Location:
+          #   Repo → Settings → Secrets and variables → Actions → Secrets
+          # Optional:
+          #   - Used only for Facebook care statements
+          #   - Bot will continue without it
+          # -------------------------------------------------------------------
+          if [ -z "${CARE_SHEET_ID}" ]; then
+            echo "⚠️  CARE_SHEET_ID not set"
+            echo "   → Facebook posts will skip care statements"
+            echo "   → Fix at: Repo Settings → Secrets and variables → Actions → Secrets"
+          fi
+  
+          echo ""
           if [ "$missing" -ne 0 ]; then
-            echo "One or more required secrets are missing. Fix repo secrets and re-run."
+            echo "🛑 One or more REQUIRED secrets are missing."
+            echo "🛠  Fix the items above and re-run the workflow."
             exit 1
           fi
+  
+          echo "✅ All required secrets present."
         env:
+          # X OAuth2
           X_CLIENT_ID: ${{ secrets.X_CLIENT_ID }}
           X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
           X_REFRESH_TOKEN: ${{ secrets.X_REFRESH_TOKEN }}
+  
+          # X OAuth1 (media)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+  
+          # Facebook
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+  
+          # Telegram
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  
+          # Optional
           CARE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          
 
       - name: Run weather bot (RSS + socials)
         env:
           ALERT_FEED_URL: "https://weather.gc.ca/rss/battleboard/onrm94_e.xml"
+          
+          # Telegram gate
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_APPROVAL_TTL_MIN: ${{ secrets.TELEGRAM_APPROVAL_TTL_MIN }}
 
           # ✅ Your new short URL default target
           TAY_COORDS_URL: "https://tayweather.short.gy/alert"
