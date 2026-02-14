@@ -240,6 +240,10 @@
     "de4ab0268a": {
       "decision": "approved",
       "decided_at": "2026-02-14T22:35:38Z"
+    },
+    "dda20ea994": {
+      "decision": "approved",
+      "decided_at": "2026-02-14T22:39:10Z"
     }
   },
   "cooldowns": {
@@ -367,9 +371,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933394,
+  "telegram_last_update_id": 259933395,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "de4ab0268a"
+  "test_gate_token": "dda20ea994"
 }
