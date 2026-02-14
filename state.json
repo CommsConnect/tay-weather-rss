@@ -215,6 +215,15 @@
       "decision": "denied",
       "decided_at": "2026-02-09T15:38:31Z",
       "reason": "expired"
+    },
+    "5a39812c21": {
+      "decision": "denied",
+      "decided_at": "2026-02-14T21:50:23Z",
+      "reason": "expired"
+    },
+    "71ea0cfb77": {
+      "decision": "approved",
+      "decided_at": "2026-02-14T21:50:52Z"
     }
   },
   "cooldowns": {
@@ -226,16 +235,7 @@
   "fb_cooldown_until": "2026-02-07T15:49:01.420280Z",
   "fb_last_posted_at": "2026-02-07T14:49:01.420280Z",
   "global_last_post_ts": 1770475754,
-  "pending_approvals": {
-    "5a39812c21": {
-      "created_at": "2026-02-09T15:38:32Z",
-      "preview_text": "\ud83d\udfe2 YELLOW WARNING - COLD ENDED ----- X (will post) -----\n\ud83d\udfe2 COLD ENDED warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 COLD ENDED warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 288,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-02-09T15:38:32Z"
-    }
-  },
+  "pending_approvals": {},
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122165144",
@@ -351,9 +351,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933385,
+  "telegram_last_update_id": 259933390,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "0c7c8a80fd"
+  "test_gate_token": "71ea0cfb77"
 }
