@@ -798,8 +798,16 @@ def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
     drive_svc = build("drive", "v3", credentials=creds, cache_discovery=False)
     return sheets_svc, drive_svc, sheet_id, drive_folder_id
 
-
 def load_care_statements_rows() -> List[dict]:
+    """
+    Loads CareStatements tab as row dicts using the actual schema you posted:
+
+      enabled | hazard | severity | platform | weight | variant text
+
+    Notes:
+    - Extra trailing columns (like old leftover numbers) are ignored because we map by header.
+    - Header matching is case-insensitive.
+    """
     sheets_svc, _, sheet_id, _ = _google_services()
     if not sheets_svc or not sheet_id:
         return []
@@ -807,99 +815,115 @@ def load_care_statements_rows() -> List[dict]:
     tab = (os.getenv("CARE_SHEET_TAB") or "CareStatements").strip()
     rng = f"{tab}!A:Z"
     resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
-    values = resp.get("values", [])
-    if not values or len(values) < 2:
+    values = resp.get("values", []) or []
+    if len(values) < 2:
         return []
 
-    headers = [h.strip().lower() for h in values[0]]
+    raw_headers = values[0]
+    headers = [(str(h).strip().lower() if h is not None else "") for h in raw_headers]
+
     rows: List[dict] = []
     for v in values[1:]:
-        row = {}
+        if not any((str(x).strip() if x is not None else "") for x in v):
+            continue
+        row: Dict[str, Any] = {}
         for i, h in enumerate(headers):
-            row[h] = v[i].strip() if i < len(v) and isinstance(v[i], str) else (v[i] if i < len(v) else "")
+            if not h:
+                continue
+            row[h] = v[i] if i < len(v) else ""
         rows.append(row)
+
     return rows
 
 
-def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> str:
+def _cs_get(row: dict, key: str) -> str:
+    return ("" if row is None else str(row.get(key, "") or "")).strip()
+
+
+def _cs_truthy(v: Any) -> bool:
+    return (str(v).strip().lower() in ("true", "1", "yes", "y", "on"))
+
+
+def _cs_norm_platform(p: str) -> str:
+    t = (p or "").strip().lower()
+    if t in ("fb", "facebook", "meta"):
+        return "FB"
+    if t in ("x", "twitter"):
+        return "X"
+    t2 = (p or "").strip().upper()
+    if t2 in ("FB", "X"):
+        return t2
+    return ""
+
+
+def _cs_int_weight(v: Any, default: int = 1) -> int:
+    try:
+        w = int(str(v).strip())
+        return max(1, w)
+    except Exception:
+        return default
+
+
+def extract_hazard_from_title(title: str) -> str:
     """
-    Return a single care statement text (or "") using your CURRENT sheet schema:
+    Attempts to extract hazard label from an EC banner-style title like:
+      "Yellow Advisory - Snowfall"
+      "Red Warning - Freezing rain"
+    Returns "" if not parseable.
+    """
+    t = (title or "").strip()
+    m = re.match(r"^(yellow|orange|red)\s+(warning|watch|advisory)\s*-\s*(.+)$", t, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    haz = (m.group(3) or "").strip()
+    return haz
+
+
+def pick_care_statement(
+    care_rows: List[dict],
+    severity_emoji_value: str,
+    hazard: str,
+    platform: str = "FB",
+) -> str:
+    """
+    Returns ONE care statement (or "") using your schema:
 
       enabled | hazard | severity | platform | weight | variant text
 
-    Notes:
-    - This function is intentionally minimal-change: it keeps the same signature
-      so you don't have to rewrite call sites.
-    - 'alert_type' is treated as the hazard key. If it doesn't match any hazard-
-      specific rows, rows with hazard='any' will still match (your sheet has many).
-    - Platform is FB by default (care statements are Facebook-focused).
+    Matching rules:
+    - enabled must be truthy (if missing/blank -> treated as enabled)
+    - platform must match (FB or X)
+    - hazard must match exact (case-insensitive) OR row hazard == "any"
+    - severity must match exact emoji (🟡🟠🔴🟢 etc) OR row severity blank (wildcard)
+    - weighted random selection using weight (default 1)
     """
-
-    def _norm(s: Any) -> str:
-        return ("" if s is None else str(s)).strip()
-
-    def _norm_lower(s: Any) -> str:
-        return _norm(s).lower()
-
-    def _is_true(v: Any) -> bool:
-        return _norm_lower(v) in ("true", "1", "yes", "y", "on")
-
-    def _norm_platform(p: Any) -> str:
-        t = _norm_lower(p)
-        if t in ("fb", "facebook", "meta"):
-            return "FB"
-        if t in ("x", "twitter"):
-            return "X"
-        t2 = _norm(p).upper()
-        return t2 if t2 in ("FB", "X") else ""
-
-    def _norm_sev(c: Any) -> str:
-        c = _norm(c)
-        if c in ("🔴", "🟠", "🟡", "🟢"):
-            return c
-        cl = c.lower()
-        if cl == "red":
-            return "🔴"
-        if cl == "orange":
-            return "🟠"
-        if cl == "yellow":
-            return "🟡"
-        if cl == "green":
-            return "🟢"
+    plat = _cs_norm_platform(platform)
+    if not plat:
         return ""
 
-    def _int_weight(v: Any, default: int = 1) -> int:
-        try:
-            w = int(_norm(v) or str(default))
-            return max(1, w)
-        except Exception:
-            return default
+    want_haz = (hazard or "").strip().lower()
+    want_sev = (severity_emoji_value or "").strip()
 
-    want_platform = "FB"
-    want_hazard = _norm_lower(alert_type)  # treated as hazard key (fallback hazard='any' works)
-    want_sev = _norm_sev(colour)
-
-    # Filter candidates
     candidates: List[dict] = []
+
     for r in (care_rows or []):
-        # enabled: if missing, treat as enabled (to be tolerant)
-        enabled_raw = r.get("enabled", "")
-        if _norm(enabled_raw) != "" and not _is_true(enabled_raw):
+        enabled_raw = _cs_get(r, "enabled")
+        if enabled_raw != "" and not _cs_truthy(enabled_raw):
             continue
 
-        r_plat = _norm_platform(r.get("platform", ""))
-        if r_plat and r_plat != want_platform:
+        r_plat = _cs_norm_platform(_cs_get(r, "platform"))
+        if r_plat != plat:
             continue
 
-        r_haz = _norm_lower(r.get("hazard", ""))
-        if r_haz and r_haz not in ("any", want_hazard):
+        r_haz = _cs_get(r, "hazard").lower()
+        if r_haz not in ("any", want_haz):
             continue
 
-        r_sev = _norm_sev(r.get("severity", ""))
+        r_sev = _cs_get(r, "severity")
         if r_sev and want_sev and r_sev != want_sev:
             continue
 
-        txt = _norm(r.get("variant text", ""))
+        txt = _cs_get(r, "variant text")
         if not txt:
             continue
 
@@ -908,81 +932,53 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str) -> 
     if not candidates:
         return ""
 
-    # Weighted pick (weights optional; defaults to 1)
     weighted: List[dict] = []
     for r in candidates:
-        w = _int_weight(r.get("weight", 1), default=1)
+        w = _cs_int_weight(_cs_get(r, "weight"), default=1)
         weighted.extend([r] * w)
 
     chosen = random.choice(weighted) if weighted else random.choice(candidates)
-    return _norm(chosen.get("variant text", ""))
+    return _cs_get(chosen, "variant text")
 
 
-def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str) -> List[str]:
+def list_matching_care_texts(
+    care_rows: List[dict],
+    severity_emoji_value: str,
+    hazard: str,
+    platform: str = "FB",
+) -> List[str]:
     """
-    Return all unique matching care texts using your CURRENT sheet schema:
-      enabled | hazard | severity | platform | weight | variant text
-    Used for Remix.
+    Returns all unique matching care texts (used for Remix).
+    Same matching rules as pick_care_statement().
     """
+    plat = _cs_norm_platform(platform)
+    if not plat:
+        return []
 
-    def _norm(s: Any) -> str:
-        return ("" if s is None else str(s)).strip()
-
-    def _norm_lower(s: Any) -> str:
-        return _norm(s).lower()
-
-    def _is_true(v: Any) -> bool:
-        return _norm_lower(v) in ("true", "1", "yes", "y", "on")
-
-    def _norm_platform(p: Any) -> str:
-        t = _norm_lower(p)
-        if t in ("fb", "facebook", "meta"):
-            return "FB"
-        if t in ("x", "twitter"):
-            return "X"
-        t2 = _norm(p).upper()
-        return t2 if t2 in ("FB", "X") else ""
-
-    def _norm_sev(c: Any) -> str:
-        c = _norm(c)
-        if c in ("🔴", "🟠", "🟡", "🟢"):
-            return c
-        cl = c.lower()
-        if cl == "red":
-            return "🔴"
-        if cl == "orange":
-            return "🟠"
-        if cl == "yellow":
-            return "🟡"
-        if cl == "green":
-            return "🟢"
-        return ""
-
-    want_platform = "FB"
-    want_hazard = _norm_lower(alert_type)
-    want_sev = _norm_sev(colour)
+    want_haz = (hazard or "").strip().lower()
+    want_sev = (severity_emoji_value or "").strip()
 
     out: List[str] = []
     seen = set()
 
     for r in (care_rows or []):
-        enabled_raw = r.get("enabled", "")
-        if _norm(enabled_raw) != "" and not _is_true(enabled_raw):
+        enabled_raw = _cs_get(r, "enabled")
+        if enabled_raw != "" and not _cs_truthy(enabled_raw):
             continue
 
-        r_plat = _norm_platform(r.get("platform", ""))
-        if r_plat and r_plat != want_platform:
+        r_plat = _cs_norm_platform(_cs_get(r, "platform"))
+        if r_plat != plat:
             continue
 
-        r_haz = _norm_lower(r.get("hazard", ""))
-        if r_haz and r_haz not in ("any", want_hazard):
+        r_haz = _cs_get(r, "hazard").lower()
+        if r_haz not in ("any", want_haz):
             continue
 
-        r_sev = _norm_sev(r.get("severity", ""))
+        r_sev = _cs_get(r, "severity")
         if r_sev and want_sev and r_sev != want_sev:
             continue
 
-        txt = _norm(r.get("variant text", ""))
+        txt = _cs_get(r, "variant text")
         if txt and txt not in seen:
             out.append(txt)
             seen.add(txt)
@@ -992,14 +988,20 @@ def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str
 
 def pick_remixed_care_text(
     care_rows: List[dict],
-    colour: str,
-    alert_type: str,
+    severity_emoji_value: str,
+    hazard: str,
     current_care_text: str,
     remix_count: int,
+    platform: str = "FB",
 ) -> str:
-    candidates = list_matching_care_texts(care_rows, colour, alert_type)
-    cur = (current_care_text or "").strip()
+    candidates = list_matching_care_texts(
+        care_rows=care_rows,
+        severity_emoji_value=severity_emoji_value,
+        hazard=hazard,
+        platform=platform,
+    )
 
+    cur = (current_care_text or "").strip()
     if cur:
         filtered = [c for c in candidates if c.strip() != cur]
         if filtered:
@@ -1010,7 +1012,7 @@ def pick_remixed_care_text(
 
     idx = abs(int(remix_count)) % len(candidates)
     return candidates[idx].strip()
-
+    
 
 # =============================================================================
 # Google Drive curated photos (FIRST choice for images)
@@ -2073,7 +2075,9 @@ def main() -> None:
         if care_rows:
             try:
                 care_severity = "🟢" if ended else sev
-                care = pick_care_statement(care_rows, care_severity, type_label)
+                hazard_label = extract_hazard_from_title(title_raw) or "any"
+                care = pick_care_statement(care_rows, care_severity, hazard_label, platform="FB")
+
 
                 if care:
                     print(f"CareStatements: matched ({care_severity} / {type_label})")
@@ -2135,13 +2139,16 @@ def main() -> None:
 
                 if care_rows and (current_remix != last_seen):
                     try:
+                        hazard_label = extract_hazard_from_title(title_raw) or "any"
                         care2 = pick_remixed_care_text(
                             care_rows=care_rows,
-                            colour=care_colour_for_sheet,
-                            alert_type=type_label,
+                            severity_emoji_value=care_colour_for_sheet,
+                            hazard=hazard_label,
                             current_care_text=care,
                             remix_count=current_remix,
+                            platform="FB",
                         )
+
                     except Exception as e:
                         print(f"⚠️ Care remix failed: {e}")
                         care2 = care
