@@ -1964,13 +1964,32 @@ def main() -> None:
                 sample_key, ("Yellow Advisory - Snowfall", "Snowfall")
             )
 
+            # --- TEST SAMPLE ALERT: build title directly from SAMPLE_ALERT ---
+            sample_key = (SAMPLE_ALERT or "").strip()
+            
+            SAMPLE_ALERT_TITLES = {
+                "orange_snowfall_warning": "Snowfall Warning",
+                "red_tornado_warning": "Tornado Warning",
+                "red_winter_storm_warning": "Winter Storm Warning",
+                "yellow_weather_advisory": "Weather Advisory",
+                "rainfall_warning": "Rainfall Warning",
+                "wind_warning": "Wind Warning",
+                "heat_warning": "Heat Warning",
+                "special_weather_statement": "Special Weather Statement",
+            }
+            
+            hazard_title = SAMPLE_ALERT_TITLES.get(sample_key, "Special Weather Statement")
+            
             fake_entry = {
                 "id": f"test-sample-{token}",
-                "title": title_for_sample,
+                "title": f"{hazard_title}",  # <-- THIS drives classify_alert_kind
                 "link": TAY_COORDS_URL,
                 "summary": f"Test sample alert ({sample_key or 'default'}; no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
+            
+            print(f"TEST SAMPLE → key={sample_key} title='{hazard_title}'")
+
 
             # compute care for the sample alert preview
             title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
