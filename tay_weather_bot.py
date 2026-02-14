@@ -1435,7 +1435,7 @@ def _pretty_title_for_social(title: str) -> str:
 def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
     """
     X post builder with character limit handling.
-    Logic: Include 'care' statement only if it fits within 280 chars 
+    Logic: Include 'care' statement only if it fits within 280 chars
     and no custom text is provided.
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
@@ -1450,21 +1450,17 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
-    # Helper function to try and append extra text (custom or care) to a base text
     def try_append_extras(base_text: str) -> str:
-        # 1. Try Custom Text first (manual entry always wins)
         if custom_x.strip():
             cand = base_text + "\n\n" + custom_x.strip()
             if len(cand) <= 280:
                 return cand
-        # 2. Try Care Statement (automatic fallback)
         elif care.strip():
             cand = base_text + "\n\n" + care.strip()
             if len(cand) <= 280:
                 return cand
         return base_text
 
-    # --- VERSION 1: MAX (2 details lines) ---
     parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_max = "\n".join(parts_max).strip()
     if len(text_max) <= 280:
@@ -1472,7 +1468,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
         if len(final_max) <= 280:
             return final_max
 
-    # --- VERSION 2: MEDIUM (1 details line) ---
     if details_lines:
         parts_med = [title_line, "", details_lines[0], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
         text_med = "\n".join(parts_med).strip()
@@ -1481,7 +1476,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
             if len(final_med) <= 280:
                 return final_med
 
-    # --- VERSION 3: MINIMAL (No details) ---
     parts_min = [title_line, "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_min = "\n".join(parts_min).strip()
     if len(text_min) <= 280:
@@ -1489,7 +1483,6 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
         if len(final_min) <= 280:
             return final_min
 
-    # ABSOLUTE FALLBACK: Truncate minimal if even that is too long
     return text_min[:277].rstrip() + "..."
 
 
@@ -1528,7 +1521,6 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     action_applied = False
     care_applied = False
 
-    # Recommended action (if present)
     if recommended_action.strip():
         parts.append("")
         parts.append("Recommended action:")
@@ -1536,13 +1528,11 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
         parts.append(f"• {ra}.")
         action_applied = True
 
-    # Care statement (append when present, even if recommended action exists)
     if care.strip():
         parts.append("")
         parts.append(care.strip())
         care_applied = True
 
-    # Custom FB text (manual always included)
     if custom_fb.strip():
         parts.append("")
         parts.append(custom_fb.strip())
@@ -1558,7 +1548,7 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     )
 
     return "\n".join(parts).strip()
-    
+
 
 # =============================================================================
 # Image selection policy
@@ -1664,6 +1654,15 @@ def main() -> None:
         ingest_telegram_actions(st, save_state)
         maybe_send_reminders(st, save_state)
 
+        # ✅ NEW: load care statements in test modes too (so your test preview proves care works)
+        care_rows: List[dict] = []
+        try:
+            care_rows = load_care_statements_rows()
+            print(f"CareStatements (test): loaded {len(care_rows)} rows")
+        except Exception as e:
+            print(f"⚠️ CareStatements (test) failed to load: {e}")
+            care_rows = []
+
         token = (st.get("test_gate_token") or "").strip()
         created_at = None
         if token:
@@ -1694,8 +1693,23 @@ def main() -> None:
                 "summary": "Test sample alert (no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
-            x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
-            fb_text = build_facebook_post_text(fake_entry, care="", more_url=more_url)
+
+            # ✅ NEW: compute care for the sample alert preview
+            title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
+            kind_for_buttons = classify_alert_kind(title_raw)
+            sev = severity_emoji(title_raw)
+            care = ""
+            if care_rows:
+                try:
+                    care = pick_care_statement(care_rows, sev, kind_for_buttons)
+                    print(f"CareStatements (test): match ({sev} / {kind_for_buttons}) => {'yes' if bool(care.strip()) else 'no'}")
+                except Exception as e:
+                    print(f"⚠️ CareStatements (test) match failed: {e}")
+                    care = ""
+
+            x_text = build_x_post_text(fake_entry, more_url=more_url, care="")  # X still does not rely on care
+            fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
+
             preview_text = (
                 f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
                 f"----- X (NO POST) -----\n{x_text}\n\n"
@@ -1704,7 +1718,6 @@ def main() -> None:
                 f"More:\n{more_url}\n\n"
                 f"TOKEN: {token}"
             )
-            kind_for_buttons = classify_alert_kind(fake_entry["title"])
 
         ensure_preview_sent(
             st,
@@ -1715,7 +1728,6 @@ def main() -> None:
             image_urls=test_images,
         )
 
-        # (Optional) one last ingest right before reading decision
         ingest_telegram_actions(st, save_state)
         d = decision_for(st, token)
         if d not in ("approved", "denied"):
@@ -1782,7 +1794,6 @@ def main() -> None:
 
             ensure_preview_sent(st, save_state, token, preview_text, kind="other", image_urls=test_images)
 
-            # (Optional) one last ingest right before reading decision
             ingest_telegram_actions(st, save_state)
             d = decision_for(st, token)
             if d not in ("approved", "denied"):
@@ -1862,11 +1873,6 @@ def main() -> None:
         title_l = (title or "").lower()
         summary_l = ((entry.get("summary") or "")).lower()
 
-        # ---------------------------------------------------------
-        # ENDED / non-active detection
-        # - We DO want to post "ended / no longer in effect" as an all-clear (🟢).
-        # - We DO NOT want to post general bulletin items like "no alerts in effect".
-        # ---------------------------------------------------------
         ended = is_alert_ended(title, entry.get("summary") or "")
 
         general_non_alert_markers = (
@@ -1898,13 +1904,12 @@ def main() -> None:
             continue
 
         title_raw = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
-        type_label = classify_alert_kind(title_raw)  # type bucket (warning/watch/advisory/...)
+        type_label = classify_alert_kind(title_raw)
         sev = severity_emoji(title_raw)
 
         care = ""
         if care_rows:
             try:
-                # ENDED cares come from 🟢 rows in the sheet
                 care_severity = "🟢" if ended else sev
                 care = pick_care_statement(care_rows, care_severity, type_label)
 
@@ -1921,7 +1926,7 @@ def main() -> None:
             drive_svc=drive_svc,
             drive_folder_id=drive_folder_id,
             alert_kind=alert_kind,
-            alert_type_label=title_raw,  # <-- pass full alert title so "wind" can be detected
+            alert_type_label=title_raw,
             severity=sev,
         )
 
@@ -1935,11 +1940,11 @@ def main() -> None:
             continue
 
         # ---------------------------------------------------------
-        # Telegram gate preview / policy  ✅ (ready-to-paste block)
+        # Telegram gate preview / policy
         # ---------------------------------------------------------
         if TELEGRAM_ENABLE_GATE:
             token = hashlib.sha1(guid.encode("utf-8")).hexdigest()[:10]
-            
+
             ingest_telegram_actions(state, save_state)
             maybe_send_reminders(state, save_state)
 
@@ -1953,9 +1958,6 @@ def main() -> None:
 
             ensure_preview_sent(state, save_state, token, preview_text, kind=alert_kind, image_urls=image_refs)
 
-            # --- Handle Remix / Custom requests (rebuild preview when requested) ---
-            # IMPORTANT: this must run BEFORE any decision-rule `continue`,
-            # otherwise Remix/Custom won't update the preview while waiting.
             custom = custom_text_for(state, token) or {}
             current_remix = remix_count_for(state, token)
             last_seen = int((state.get("telegram_last_remix_seen") or {}).get(token, 0))
@@ -1982,10 +1984,7 @@ def main() -> None:
                         print(f"⚠️ Care remix failed: {e}")
                         care2 = care
 
-                # Apply custom text in a controlled way:
-                # - X: no care; optional custom x only if it fits
                 x_text2 = build_x_post_text(entry, more_url=more_url, care=care2, custom_x=x_extra)
-                # - FB: care + optional custom fb
                 fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url, custom_fb=fb_extra)
 
                 care = care2
@@ -2008,7 +2007,6 @@ def main() -> None:
                     except Exception:
                         pass
 
-                # Clear custom text once applied so it doesn’t re-apply forever
                 try:
                     clear_custom_text(state, token)
                 except Exception:
@@ -2018,18 +2016,12 @@ def main() -> None:
                 state["telegram_last_remix_seen"][token] = int(current_remix)
                 save_state(state)
 
-                # ✅ catch fast follow-up clicks (Approve/Deny) right after refresh
                 ingest_telegram_actions(state, save_state)
 
-            # Decision rules:
-            # - WARNING: denied => no post; approved => post; else auto-post after delay unless denied.
-            # - OTHER: must be approved (wait up to TELEGRAM_WAIT_SECONDS); timeout => denied.
-            # (Optional) one last ingest right before reading decision
             ingest_telegram_actions(state, save_state)
             d = decision_for(state, token)
 
             if alert_kind == "warning":
-                # Denied = hard stop
                 if d == "denied":
                     print(f"🛑 Telegram denied for WARNING token={token}. Skipping.")
                     try:
@@ -2038,7 +2030,6 @@ def main() -> None:
                         pass
                     continue
 
-                # Approved = post immediately
                 if d == "approved":
                     print(f"✅ Telegram approved for WARNING token={token}. Proceeding to post.")
                     try:
@@ -2046,13 +2037,10 @@ def main() -> None:
                     except Exception:
                         pass
                 else:
-                    # Pending: wait until delay window elapses, then auto-post unless denied
                     if not warning_delay_elapsed(state, token):
                         print(f"⏳ WARNING waiting for delay window (token={token}). Not posting this run.")
-                        # We intentionally DO NOT post yet. Preview can still be refreshed on later runs.
                         continue
 
-                    # Delay elapsed — ingest latest Telegram actions and re-check for denial
                     ingest_telegram_actions(state, save_state)
                     d2 = decision_for(state, token)
                     if d2 == "denied":
@@ -2070,7 +2058,6 @@ def main() -> None:
                         pass
 
             else:
-                # Non-warning alerts must be explicitly approved
                 if d not in ("approved", "denied"):
                     d = wait_for_decision_safe(state, token)
 
@@ -2102,7 +2089,6 @@ def main() -> None:
                     pass
                 continue
 
-        
         # ---------------------------------------------------------
         # Post now (capture outcomes + confirm to Telegram)
         # ---------------------------------------------------------
@@ -2112,7 +2098,6 @@ def main() -> None:
         x_err = ""
         fb_err = ""
 
-        # --- X ---
         if EFFECTIVE_ENABLE_X_POSTING:
             try:
                 safe_post_to_x(x_text, image_refs=image_refs)
@@ -2127,11 +2112,9 @@ def main() -> None:
                 else:
                     x_err = msg
                     print(f"⚠️ X post failed: {e}")
-
         else:
             print("X posting skipped (disabled or run mode).")
 
-        # --- Facebook ---
         if EFFECTIVE_ENABLE_FB_POSTING:
             fb_images = materialize_images_for_facebook(image_refs)
             try:
@@ -2147,7 +2130,6 @@ def main() -> None:
         else:
             print("Facebook posting skipped (disabled or run mode).")
 
-        # --- Telegram: confirm outcome ---
         if TELEGRAM_ENABLE_GATE:
             try:
                 lines = []
@@ -2178,9 +2160,6 @@ def main() -> None:
             except Exception as e:
                 print(f"⚠️ Telegram post-confirmation failed: {e}")
 
-        # ---------------------------------------------------------
-        # Update state
-        # ---------------------------------------------------------
         if posted_this:
             posted.add(guid)
             posted_text_hashes.add(h)
@@ -2191,7 +2170,6 @@ def main() -> None:
             mark_posted(state, DISPLAY_AREA_NAME, kind=alert_kind)
             save_state(state)
 
-    # --- Write RSS file at end
     try:
         trim_rss_items(channel, MAX_RSS_ITEMS)
         tree.write(RSS_PATH, encoding="utf-8", xml_declaration=True)
