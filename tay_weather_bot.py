@@ -1467,7 +1467,8 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     Facebook SHOULD include:
       - Details lines (What/When)
       - Recommended action (when present on EC page)
-      - OR Care statement (from Google Sheets) IF no recommended action is found
+      - Care statement (from Google Sheets) when available
+        - Care is appended even if Recommended action exists
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
@@ -1493,21 +1494,24 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("")
     parts.extend(details_lines[:3])
 
-    # --- THE MODIFIED LOGIC START ---
-    
-    if recommended_action:
-        # If we have an official action from Weather Canada, use it
+    action_applied = False
+    care_applied = False
+
+    # Recommended action (if present)
+    if recommended_action.strip():
         parts.append("")
         parts.append("Recommended action:")
         ra = recommended_action.strip().rstrip(".")
         parts.append(f"• {ra}.")
-    elif care:
-        # ONLY if there's NO recommended_action, we add the care statement
+        action_applied = True
+
+    # Care statement (append when present, even if recommended action exists)
+    if care.strip():
         parts.append("")
         parts.append(care.strip())
-        
-    # --- THE MODIFIED LOGIC END ---
+        care_applied = True
 
+    # Custom FB text (manual always included)
     if custom_fb.strip():
         parts.append("")
         parts.append(custom_fb.strip())
@@ -1518,8 +1522,8 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("#TayTownship #ONStorm")
 
     print(
-        f"FB build: action={'yes' if bool(recommended_action) else 'no'}, "
-        f"care_applied={'yes' if (not recommended_action and care) else 'no'}"
+        f"FB build: action={'yes' if action_applied else 'no'}, "
+        f"care_applied={'yes' if care_applied else 'no'}"
     )
 
     return "\n".join(parts).strip()
