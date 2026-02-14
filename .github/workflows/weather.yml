@@ -146,6 +146,39 @@ jobs:
           # Prefer repo var if present, otherwise default
           TAY_COORDS_URL: ${{ vars.TAY_ALERTS_URL || 'https://tayweather.short.gy/alert' }}
 
+
+      - name: Smoke test Google Drive folder access (no secrets)
+        env:
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        run: |
+          python - <<'PY'
+          import os
+          from googleapiclient.discovery import build
+
+          folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+          if not folder_id:
+            raise SystemExit("❌ GOOGLE_DRIVE_FOLDER_ID secret is empty/missing")
+
+          svc = build("drive", "v3")
+          q = f"'{folder_id}' in parents and trashed=false"
+          res = svc.files().list(
+              q=q,
+              fields="files(id,name,mimeType),nextPageToken",
+              pageSize=1,
+              supportsAllDrives=True,
+              includeItemsFromAllDrives=True,
+          ).execute()
+
+          files = res.get("files", [])
+          if not files:
+            print("⚠️  Drive auth OK, but folder appears empty OR SA has no access to that folder.")
+          else:
+            f = files[0]
+            print("✅ Drive auth OK. Example file:")
+            print(f"- {f.get('name')} ({f.get('mimeType')}) id={f.get('id')}")
+          PY
+
+
       - name: Sanity check required secrets (fails fast)
         run: |
           missing=0
