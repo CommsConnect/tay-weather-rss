@@ -87,6 +87,23 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
+      - name: Debug Google creds file exists (no secrets printed)
+        run: |
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_APPLICATION_CREDENTIALS"
+          if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+            echo "❌ GOOGLE_APPLICATION_CREDENTIALS is not set"
+            exit 1
+          fi
+
+          if [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+            echo "✅ creds file exists"
+            echo "creds file size bytes: $(wc -c < "$GOOGLE_APPLICATION_CREDENTIALS" | tr -d ' ')"
+          else
+            echo "❌ creds file does NOT exist at path above"
+            ls -la
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
