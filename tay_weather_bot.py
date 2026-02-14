@@ -188,44 +188,49 @@ def _no_post_guard(platform: str) -> bool:
 # Sheet columns expected (header names, case-insensitive):
 #   enabled | hazard | severity | platform | weight | variant text
 #
+# Optional column (recommended if you want warning vs advisory control too):
+#   kind   (warning/watch/advisory/statement/other or "any" or blank)
+#
 # Rules:
-# - enabled must be truthy (TRUE/true/1/yes/y)
-# - hazard matches exact OR row hazard == "any"
-# - severity matches exact emoji OR row severity blank (acts as wildcard)
+# - enabled must be truthy (TRUE/true/1/yes/y). If missing, defaults TRUE.
+# - hazard matches exact (case-insensitive) OR row hazard == "any" OR blank
+# - severity matches exact emoji OR row severity blank (wildcard)
+# - kind matches exact OR row kind == "any" OR blank (wildcard)
 # - platform matches normalized ("FB" or "X")
 # - weight defaults to 1 if missing/invalid
-#
-# IMPORTANT:
-# - Any extra trailing columns (like your old leftover numbers) are ignored.
+# - Extra trailing columns are ignored (including old leftover numbers).
 # =============================================================================
 
 import random
 from typing import Any, Dict, List, Optional
 
 
-def _cs_norm(s: Any) -> str:
-    return ("" if s is None else str(s)).strip()
+def _cs_norm(v: Any) -> str:
+    return ("" if v is None else str(v)).strip()
 
 
-def _cs_norm_lower(s: Any) -> str:
-    return _cs_norm(s).lower()
+def _cs_lower(v: Any) -> str:
+    return _cs_norm(v).lower()
 
 
-def _cs_norm_upper(s: Any) -> str:
-    return _cs_norm(s).upper()
+def _cs_upper(v: Any) -> str:
+    return _cs_norm(v).upper()
 
 
 def _cs_is_true(v: Any) -> bool:
-    return _cs_norm_lower(v) in ("true", "1", "yes", "y")
+    # If the sheet doesn't have enabled, treat as enabled.
+    if _cs_norm(v) == "":
+        return True
+    return _cs_lower(v) in ("true", "1", "yes", "y", "on")
 
 
 def _cs_norm_platform(p: Any) -> str:
-    t = _cs_norm_lower(p)
+    t = _cs_lower(p)
     if t in ("fb", "facebook", "meta"):
         return "FB"
     if t in ("x", "twitter"):
         return "X"
-    t2 = _cs_norm_upper(p)
+    t2 = _cs_upper(p)
     if t2 in ("FB", "X"):
         return t2
     return ""
@@ -239,39 +244,33 @@ def _cs_int_weight(v: Any, default: int = 1) -> int:
         return default
 
 
-def _cs_row_to_dict(headers: List[str], row: List[Any]) -> Dict[str, Any]:
-    d: Dict[str, Any] = {}
-    for i, h in enumerate(headers):
-        if not h:
-            continue
-        d[h] = row[i] if i < len(row) else ""
-    return d
-
-
-def load_care_statements_from_sheet(
-    sheets_svc,
-    sheet_id: str,
-    tab_name: str,
-) -> List[Dict[str, Any]]:
-    rng = f"{tab_name}!A:Z"
-    res = (
-        sheets_svc.spreadsheets()
-        .values()
-        .get(spreadsheetId=sheet_id, range=rng)
-        .execute()
-    )
-    values = res.get("values", []) or []
-    if not values:
+def load_care_statements_rows() -> List[dict]:
+    """
+    Loads CareStatements tab into a list[dict] keyed by lowercase headers.
+    """
+    sheets_svc, _, sheet_id, _ = _google_services()
+    if not sheets_svc or not sheet_id:
         return []
 
-    raw_headers = values[0]
-    headers = [_cs_norm_lower(h) for h in raw_headers]
+    tab = (os.getenv("CARE_SHEET_TAB") or "CareStatements").strip()
+    rng = f"{tab}!A:Z"
+    resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
+    values = resp.get("values", []) or []
+    if len(values) < 2:
+        return []
 
-    rows: List[Dict[str, Any]] = []
-    for r in values[1:]:
-        if not any(_cs_norm(x) for x in r):
+    headers = [_cs_lower(h) for h in values[0]]
+
+    rows: List[dict] = []
+    for v in values[1:]:
+        if not any(_cs_norm(x) for x in v):
             continue
-        rows.append(_cs_row_to_dict(headers, r))
+        row: Dict[str, Any] = {}
+        for i, h in enumerate(headers):
+            if not h:
+                continue
+            row[h] = v[i] if i < len(v) else ""
+        rows.append(row)
 
     return rows
 
@@ -281,48 +280,139 @@ def pick_care_statement(
     platform: str,
     severity: str,
     hazard: str,
-) -> Optional[str]:
+    kind: str = "",
+) -> str:
+    """
+    Returns one care statement (or "").
+    Matches:
+      platform + hazard + severity (+ optional kind if column exists/used)
+    """
     plat = _cs_norm_platform(platform)
-    sev = _cs_norm(severity)
-    haz = _cs_norm_lower(hazard)
-
     if not plat:
-        return None
+        return ""
+
+    sev = _cs_norm(severity)
+    haz = _cs_lower(hazard)
+    knd = _cs_lower(kind)
+
+    # Determine if the sheet actually has a "kind" column in any row.
+    has_kind_col = any(("kind" in (r or {})) for r in (rows or []))
 
     candidates: List[Dict[str, Any]] = []
 
-    for r in rows:
-        if not _cs_is_true(r.get("enabled")):
+    for r in rows or []:
+        if not _cs_is_true((r or {}).get("enabled")):
             continue
 
-        r_plat = _cs_norm_platform(r.get("platform"))
+        r_plat = _cs_norm_platform((r or {}).get("platform"))
         if r_plat != plat:
             continue
 
-        r_haz = _cs_norm_lower(r.get("hazard"))
-        if r_haz not in ("any", haz):
+        r_haz = _cs_lower((r or {}).get("hazard"))
+        if r_haz not in ("", "any", haz):
             continue
 
-        r_sev = _cs_norm(r.get("severity"))
+        r_sev = _cs_norm((r or {}).get("severity"))
         if r_sev and sev and r_sev != sev:
             continue
 
-        txt = _cs_norm(r.get("variant text"))
+        if has_kind_col and knd:
+            r_kind = _cs_lower((r or {}).get("kind"))
+            if r_kind not in ("", "any", knd):
+                continue
+
+        txt = _cs_norm((r or {}).get("variant text"))
         if not txt:
             continue
 
         candidates.append(r)
 
     if not candidates:
-        return None
+        return ""
 
     weighted: List[Dict[str, Any]] = []
     for r in candidates:
-        w = _cs_int_weight(r.get("weight"), default=1)
+        w = _cs_int_weight((r or {}).get("weight"), default=1)
         weighted.extend([r] * w)
 
     chosen = random.choice(weighted) if weighted else random.choice(candidates)
-    return _cs_norm(chosen.get("variant text")) or None
+    return _cs_norm((chosen or {}).get("variant text"))
+
+
+def list_matching_care_texts(
+    rows: List[Dict[str, Any]],
+    platform: str,
+    severity: str,
+    hazard: str,
+    kind: str = "",
+) -> List[str]:
+    """
+    Returns all unique matching care texts (used for Remix).
+    """
+    plat = _cs_norm_platform(platform)
+    if not plat:
+        return []
+
+    sev = _cs_norm(severity)
+    haz = _cs_lower(hazard)
+    knd = _cs_lower(kind)
+
+    has_kind_col = any(("kind" in (r or {})) for r in (rows or []))
+
+    out: List[str] = []
+    seen = set()
+
+    for r in rows or []:
+        if not _cs_is_true((r or {}).get("enabled")):
+            continue
+
+        r_plat = _cs_norm_platform((r or {}).get("platform"))
+        if r_plat != plat:
+            continue
+
+        r_haz = _cs_lower((r or {}).get("hazard"))
+        if r_haz not in ("", "any", haz):
+            continue
+
+        r_sev = _cs_norm((r or {}).get("severity"))
+        if r_sev and sev and r_sev != sev:
+            continue
+
+        if has_kind_col and knd:
+            r_kind = _cs_lower((r or {}).get("kind"))
+            if r_kind not in ("", "any", knd):
+                continue
+
+        txt = _cs_norm((r or {}).get("variant text"))
+        if txt and txt not in seen:
+            out.append(txt)
+            seen.add(txt)
+
+    return out
+
+
+def pick_remixed_care_text(
+    care_rows: List[dict],
+    platform: str,
+    severity: str,
+    hazard: str,
+    kind: str,
+    current_care_text: str,
+    remix_count: int,
+) -> str:
+    candidates = list_matching_care_texts(care_rows, platform, severity, hazard, kind)
+    cur = (current_care_text or "").strip()
+
+    if cur:
+        filtered = [c for c in candidates if c.strip() != cur]
+        if filtered:
+            candidates = filtered
+
+    if not candidates:
+        return cur
+
+    idx = abs(int(remix_count)) % len(candidates)
+    return candidates[idx].strip()
 
 
 # =============================================================================
@@ -1818,7 +1908,7 @@ def main() -> None:
         ingest_telegram_actions(st, save_state)
         maybe_send_reminders(st, save_state)
 
-        # ✅ NEW: load care statements in test modes too (so your test preview proves care works)
+        # ✅ load care statements in test modes too (so your test preview proves care works)
         care_rows: List[dict] = []
         try:
             care_rows = load_care_statements_rows()
@@ -1837,7 +1927,9 @@ def main() -> None:
             or (created_at and is_expired(st, token))
             or (token and decision_for(st, token) in ("approved", "denied"))
         ):
-            token = hashlib.sha1(f"test:{RUN_MODE}:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
+            token = hashlib.sha1(
+                f"test:{RUN_MODE}:{dt.datetime.utcnow().isoformat()}".encode("utf-8")
+            ).hexdigest()[:10]
             st["test_gate_token"] = token
             save_state(st)
 
@@ -1849,29 +1941,62 @@ def main() -> None:
                 f"TOKEN: {token}"
             )
             kind_for_buttons = "other"
+
         else:
+            # -----------------------------------------------------------------
+            # Sample alert selection comes from workflow input: SAMPLE_ALERT
+            # -----------------------------------------------------------------
+            sample_key = (os.getenv("SAMPLE_ALERT") or "").strip().lower()
+
+            # Map workflow choices -> (EC-style title, hazard label for care matching)
+            sample_map = {
+                "orange_snowfall_warning": ("Orange Warning - Snowfall", "Snowfall"),
+                "red_tornado_warning": ("Red Warning - Tornado", "Tornado"),
+                "red_winter_storm_warning": ("Red Warning - Winter storm", "Winter storm"),
+                "yellow_weather_advisory": ("Yellow Advisory - Weather", "Weather"),
+                "rainfall_warning": ("Red Warning - Rainfall", "Rainfall"),
+                "wind_warning": ("Red Warning - Wind", "Wind"),
+                "heat_warning": ("Red Warning - Heat", "Heat"),
+                "special_weather_statement": ("Special weather statement", "Special weather statement"),
+            }
+
+            title_for_sample, hazard_for_sample = sample_map.get(
+                sample_key, ("Yellow Advisory - Snowfall", "Snowfall")
+            )
+
             fake_entry = {
                 "id": f"test-sample-{token}",
-                "title": "Yellow Advisory - Snowfall",
+                "title": title_for_sample,
                 "link": TAY_COORDS_URL,
-                "summary": "Test sample alert (no post).",
+                "summary": f"Test sample alert ({sample_key or 'default'}; no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
 
-            # ✅ NEW: compute care for the sample alert preview
+            # compute care for the sample alert preview
             title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
             kind_for_buttons = classify_alert_kind(title_raw)
             sev = severity_emoji(title_raw)
+
             care = ""
             if care_rows:
                 try:
-                    care = pick_care_statement(care_rows, sev, kind_for_buttons)
-                    print(f"CareStatements (test): match ({sev} / {kind_for_buttons}) => {'yes' if bool(care.strip()) else 'no'}")
+                    # FB care statement uses platform + severity + hazard (+ kind if you added it)
+                    care = pick_care_statement(
+                        care_rows,
+                        platform="FB",
+                        severity=sev,
+                        hazard=hazard_for_sample,
+                        kind=kind_for_buttons,
+                    )
+                    print(
+                        f"CareStatements (test): match (FB / {hazard_for_sample} / {sev} / {kind_for_buttons})"
+                        f" => {'yes' if bool(care.strip()) else 'no'}"
+                    )
                 except Exception as e:
                     print(f"⚠️ CareStatements (test) match failed: {e}")
                     care = ""
 
-            x_text = build_x_post_text(fake_entry, more_url=more_url, care="")  # X still does not rely on care
+            x_text = build_x_post_text(fake_entry, more_url=more_url, care="")  # X stays clean
             fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
 
             preview_text = (
@@ -1879,6 +2004,7 @@ def main() -> None:
                 f"----- X (NO POST) -----\n{x_text}\n\n"
                 f"----- Facebook (NO POST) -----\n{fb_text}\n\n"
                 f"RUN_MODE: {RUN_MODE}\n"
+                f"SAMPLE_ALERT: {sample_key or '(default)'}\n"
                 f"More:\n{more_url}\n\n"
                 f"TOKEN: {token}"
             )
@@ -1915,6 +2041,7 @@ def main() -> None:
 
         tg_send_test_success("Telegram preview + buttons path completed (NO POST mode).")
         return
+    
 
     # -------------------------------------------------------------------------
     # LIVE MODE: Optional platform test (existing behaviour preserved)
