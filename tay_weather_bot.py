@@ -606,21 +606,51 @@ def _extract_recommended_action_from_ec(official_url: str) -> str:
 # Google Sheet + Google Drive integration
 # =============================================================================
 def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
-    sheet_id = (os.getenv("GOOGLE_SHEET_ID") or "").strip()
-    sa_json = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
+    """
+    Supports both auth styles:
+      A) Legacy: GOOGLE_SERVICE_ACCOUNT_JSON (inline JSON)
+      B) GitHub Actions auth@v2: GOOGLE_APPLICATION_CREDENTIALS (path to JSON file)
+    Also supports CARE_SHEET_ID in addition to GOOGLE_SHEET_ID.
+    """
+    # Sheet ID: prefer CARE_SHEET_ID, fallback to GOOGLE_SHEET_ID
+    sheet_id = (os.getenv("CARE_SHEET_ID") or os.getenv("GOOGLE_SHEET_ID") or "").strip()
+
+    # Drive folder ID (leave as-is if you're already using this)
     drive_folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
 
-    if not sheet_id or not sa_json:
-        return None, None, "", drive_folder_id
+    # Credentials: prefer inline JSON, otherwise use credentials file path
+    sa_json = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
 
-    info = json.loads(sa_json)
-    creds = service_account.Credentials.from_service_account_info(
-        info,
-        scopes=[
-            "https://www.googleapis.com/auth/spreadsheets.readonly",
-            "https://www.googleapis.com/auth/drive.readonly",
-        ],
-    )
+    creds = None
+    if sa_json:
+        info = json.loads(sa_json)
+        creds = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets.readonly",
+                "https://www.googleapis.com/auth/drive.readonly",
+            ],
+        )
+    else:
+        # GitHub auth@v2 writes a creds file and sets GOOGLE_APPLICATION_CREDENTIALS
+        cred_path = (
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            or os.getenv("CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE")
+            or os.getenv("GOOGLE_GHA_CREDS_PATH")
+            or ""
+        ).strip()
+
+        if cred_path and os.path.exists(cred_path):
+            creds = service_account.Credentials.from_service_account_file(
+                cred_path,
+                scopes=[
+                    "https://www.googleapis.com/auth/spreadsheets.readonly",
+                    "https://www.googleapis.com/auth/drive.readonly",
+                ],
+            )
+
+    if not sheet_id or creds is None:
+        return None, None, "", drive_folder_id
 
     sheets_svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
     drive_svc = build("drive", "v3", credentials=creds, cache_discovery=False)
@@ -632,7 +662,8 @@ def load_care_statements_rows() -> List[dict]:
     if not sheets_svc or not sheet_id:
         return []
 
-    rng = "CareStatements!A:Z"
+    tab = (os.getenv("CARE_SHEET_TAB") or "CareStatements").strip()
+    rng = f"{tab}!A:Z"
     resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
     values = resp.get("values", [])
     if not values or len(values) < 2:
