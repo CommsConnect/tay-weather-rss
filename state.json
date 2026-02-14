@@ -228,6 +228,10 @@
     "816e189412": {
       "decision": "approved",
       "decided_at": "2026-02-14T21:56:00Z"
+    },
+    "f1c0498485": {
+      "decision": "approved",
+      "decided_at": "2026-02-14T22:09:02Z"
     }
   },
   "cooldowns": {
@@ -355,9 +359,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933391,
+  "telegram_last_update_id": 259933392,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "816e189412"
+  "test_gate_token": "f1c0498485"
 }
