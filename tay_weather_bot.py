@@ -1726,8 +1726,39 @@ def main() -> None:
                 "summary": "Test sample alert (no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
+
+            # --- Load CareStatements for TEST previews (so FB care shows) ---
+            care_rows: List[dict] = []
+            try:
+                care_rows = load_care_statements_rows()
+                print(f"CareStatements(TEST): loaded {len(care_rows)} rows")
+                if care_rows:
+                    print("CareStatements(TEST): sample keys:", sorted(care_rows[0].keys()))
+            except Exception as e:
+                print(f"⚠️ CareStatements(TEST) failed to load: {e}")
+                care_rows = []
+
+            title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
+            type_label = classify_alert_kind(title_raw)   # warning/watch/advisory/...
+            sev = severity_emoji(title_raw)
+
+            care = ""
+            if care_rows:
+                try:
+                    care = pick_care_statement(care_rows, sev, type_label)
+                    print(f"CareStatements(TEST): match ({sev} / {type_label}) => {'yes' if bool(care) else 'no'}")
+                    if care:
+                        print("CareStatements(TEST): chosen text:", (care[:120] + "…") if len(care) > 120 else care)
+                except Exception as e:
+                    print(f"⚠️ CareStatements(TEST) match failed: {e}")
+                    care = ""
+
+            # X stays clean in test previews
             x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
-            fb_text = build_facebook_post_text(fake_entry, care="", more_url=more_url)
+
+            # FB gets care in test previews
+            fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
+
             preview_text = (
                 f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
                 f"----- X (NO POST) -----\n{x_text}\n\n"
@@ -1737,6 +1768,7 @@ def main() -> None:
                 f"TOKEN: {token}"
             )
             kind_for_buttons = classify_alert_kind(fake_entry["title"])
+
 
         ensure_preview_sent(
             st,
