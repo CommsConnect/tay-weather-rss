@@ -128,6 +128,41 @@ COOLDOWN_MINUTES = {
 }
 GLOBAL_COOLDOWN_MINUTES = 5
 
+
+# -----------------------------------------------------------------------------
+# Google API helpers
+# -----------------------------------------------------------------------------
+def _google_services():
+    """
+    Returns:
+      (sheets_svc, drive_svc, sheet_id, drive_folder_id)
+
+    Auth:
+      Uses Application Default Credentials provided by google-github-actions/auth@v2
+      (GOOGLE_APPLICATION_CREDENTIALS points at a generated JSON file in Actions).
+    """
+    from google.auth import default as google_auth_default
+    from googleapiclient.discovery import build as gbuild
+
+    # These env vars are already in your workflow logs
+    sheet_id = (os.getenv("CARE_SHEET_ID") or "").strip()
+    drive_folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+
+    # Scopes should match what you request in google-github-actions/auth@v2
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+
+    creds, _ = google_auth_default(scopes=scopes)
+
+    sheets_svc = gbuild("sheets", "v4", credentials=creds, cache_discovery=False)
+    drive_svc = gbuild("drive", "v3", credentials=creds, cache_discovery=False)
+
+    return sheets_svc, drive_svc, sheet_id, drive_folder_id
+
+
+
 # =============================================================================
 # Telegram helper: final "test succeeded" confirmation
 # =============================================================================
