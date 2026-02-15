@@ -192,17 +192,21 @@ def _no_post_guard(platform: str) -> bool:
 #   kind   (warning/watch/advisory/statement/other or "any" or blank)
 #
 # Rules:
-# - enabled must be truthy (TRUE/true/1/yes/y). If missing, defaults TRUE.
-# - hazard matches exact (case-insensitive) OR row hazard == "any" OR blank
-# - severity matches exact emoji OR row severity blank (wildcard)
-# - kind matches exact OR row kind == "any" OR blank (wildcard)
+# - enabled must be truthy (TRUE/true/1/yes/y). If missing/blank, defaults TRUE.
 # - platform matches normalized ("FB" or "X")
+# - hazard is matched as a normalized key:
+#     * exact match (ex: "cold")
+#     * or row hazard == "any" or blank (wildcard)
+# - severity matches exact emoji (🟡🟠🔴🟢 etc)
+#     * or row severity blank (wildcard)
+# - kind matches exact OR "any" OR blank (wildcard) when provided
 # - weight defaults to 1 if missing/invalid
-# - Extra trailing columns are ignored (including old leftover numbers).
+#
+# IMPORTANT:
+# - Severity emoji logic elsewhere must NOT be changed. We only CONSUME the emoji here.
 # =============================================================================
 
 import random
-from typing import Any, Dict, List, Optional
 
 
 def _cs_norm(v: Any) -> str:
@@ -244,6 +248,63 @@ def _cs_int_weight(v: Any, default: int = 1) -> int:
         return default
 
 
+def _hazard_key(raw: str) -> str:
+    """
+    Normalizes a hazard label into a stable key used for sheet matching.
+    Examples:
+      "Freezing rain" -> "freezing_rain"
+      "COLD"          -> "cold"
+      "Extreme cold"  -> "extreme_cold" (then aliased to "cold" below)
+    """
+    s = _cs_lower(raw)
+    s = s.replace("–", "-").replace("—", "-")
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return s
+
+
+# Care-statement hazard aliases (matching only; does NOT change alert wording)
+_HAZARD_ALIAS = {
+    "extreme_cold": "cold",   # your requested behaviour
+}
+
+
+def hazard_for_care(title_raw: str) -> str:
+    """
+    Extract hazard from EC titles in BOTH formats:
+      1) "YELLOW WARNING - COLD, Tuktoyaktuk - East Channel Region"
+      2) "Yellow Warning - Cold"
+
+    Returns normalized hazard key (ex: "cold"), or "" if not parseable.
+    Applies aliasing: extreme_cold -> cold.
+    """
+    t = (title_raw or "").strip()
+    if not t:
+        return ""
+
+    # Format A: battleboard style with comma + uppercase words
+    # "YELLOW WARNING - COLD, Some Place"
+    m = re.match(
+        r"^(yellow|orange|red)\s+(warning|watch|advisory|statement)\s*-\s*([^,]+)",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        # Format B: classic banner style
+        # "Yellow Warning - Cold"
+        m = re.match(
+            r"^(yellow|orange|red)\s+(warning|watch|advisory|statement)\s*-\s*(.+)$",
+            t,
+            flags=re.IGNORECASE,
+        )
+
+    if not m:
+        return ""
+
+    haz_raw = (m.group(3) or "").strip()
+    hk = _hazard_key(haz_raw)
+    return _HAZARD_ALIAS.get(hk, hk)
+
+
 def load_care_statements_rows() -> List[dict]:
     """
     Loads CareStatements tab into a list[dict] keyed by lowercase headers.
@@ -275,6 +336,35 @@ def load_care_statements_rows() -> List[dict]:
     return rows
 
 
+def _cs_text(row: Dict[str, Any]) -> str:
+    return _cs_norm((row or {}).get("variant text"))
+
+
+def _cs_row_hazard_key(row: Dict[str, Any]) -> str:
+    # Accept user-entered values like "Cold", "COLD", "freezing_rain"
+    # Normalize to same key format used by hazard_for_care().
+    return _hazard_key(_cs_norm((row or {}).get("hazard")))
+
+
+def _cs_row_sev(row: Dict[str, Any]) -> str:
+    return _cs_norm((row or {}).get("severity"))
+
+
+def _cs_row_kind(row: Dict[str, Any]) -> str:
+    return _cs_lower((row or {}).get("kind"))
+
+
+def _weighted_pick(rows: List[Dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    weighted: List[Dict[str, Any]] = []
+    for r in rows:
+        w = _cs_int_weight((r or {}).get("weight"), default=1)
+        weighted.extend([r] * w)
+    chosen = random.choice(weighted) if weighted else random.choice(rows)
+    return _cs_text(chosen)
+
+
 def pick_care_statement(
     rows: List[Dict[str, Any]],
     platform: str,
@@ -283,60 +373,83 @@ def pick_care_statement(
     kind: str = "",
 ) -> str:
     """
-    Returns one care statement (or "").
-    Matches:
-      platform + hazard + severity (+ optional kind if column exists/used)
+    Deterministic selection by priority:
+      1) exact hazard + exact severity
+      2) exact hazard + any severity
+      3) any hazard  + exact severity
+      4) any hazard  + any severity
+
+    'hazard' should be a normalized key (ex: "cold"). You can pass raw text; we normalize it.
     """
     plat = _cs_norm_platform(platform)
     if not plat:
         return ""
 
-    sev = _cs_norm(severity)
-    haz = _cs_lower(hazard)
+    sev = _cs_norm(severity)  # emoji
+    haz = _hazard_key(hazard)
+    haz = _HAZARD_ALIAS.get(haz, haz)
     knd = _cs_lower(kind)
 
-    # Determine if the sheet actually has a "kind" column in any row.
     has_kind_col = any(("kind" in (r or {})) for r in (rows or []))
 
-    candidates: List[Dict[str, Any]] = []
-
+    # Pre-filter platform + enabled (+ kind if used)
+    base: List[Dict[str, Any]] = []
     for r in rows or []:
         if not _cs_is_true((r or {}).get("enabled")):
             continue
-
-        r_plat = _cs_norm_platform((r or {}).get("platform"))
-        if r_plat != plat:
+        if _cs_norm_platform((r or {}).get("platform")) != plat:
             continue
-
-        r_haz = _cs_lower((r or {}).get("hazard"))
-        if r_haz not in ("", "any", haz):
-            continue
-
-        r_sev = _cs_norm((r or {}).get("severity"))
-        if r_sev and sev and r_sev != sev:
-            continue
-
         if has_kind_col and knd:
-            r_kind = _cs_lower((r or {}).get("kind"))
-            if r_kind not in ("", "any", knd):
+            rk = _cs_row_kind(r)
+            if rk not in ("", "any", knd):
                 continue
-
-        txt = _cs_norm((r or {}).get("variant text"))
-        if not txt:
+        if not _cs_text(r):
             continue
+        base.append(r)
 
-        candidates.append(r)
-
-    if not candidates:
+    if not base:
         return ""
 
-    weighted: List[Dict[str, Any]] = []
-    for r in candidates:
-        w = _cs_int_weight((r or {}).get("weight"), default=1)
-        weighted.extend([r] * w)
+    def is_any_hazard(r: Dict[str, Any]) -> bool:
+        rh_raw = _cs_lower((r or {}).get("hazard"))
+        rhk = _cs_row_hazard_key(r)
+        return (rh_raw in ("", "any")) or (rhk == "")
 
-    chosen = random.choice(weighted) if weighted else random.choice(candidates)
-    return _cs_norm((chosen or {}).get("variant text"))
+    def hazard_matches(r: Dict[str, Any]) -> bool:
+        if not haz:
+            return is_any_hazard(r)  # if we can't parse hazard, only use wildcards
+        rh_raw = _cs_lower((r or {}).get("hazard"))
+        if rh_raw in ("", "any"):
+            return True
+        return _cs_row_hazard_key(r) == haz
+
+    def sev_is_wild(r: Dict[str, Any]) -> bool:
+        return _cs_row_sev(r) == ""
+
+    def sev_matches(r: Dict[str, Any]) -> bool:
+        rs = _cs_row_sev(r)
+        if rs == "":
+            return True
+        return bool(sev) and (rs == sev)
+
+    # Buckets in priority order
+    bucket1 = [r for r in base if (hazard_matches(r) and (not is_any_hazard(r)) and _cs_row_sev(r) == sev)]
+    if bucket1:
+        return _weighted_pick(bucket1)
+
+    bucket2 = [r for r in base if (hazard_matches(r) and (not is_any_hazard(r)) and sev_is_wild(r))]
+    if bucket2:
+        return _weighted_pick(bucket2)
+
+    bucket3 = [r for r in base if (is_any_hazard(r) and _cs_row_sev(r) == sev)]
+    if bucket3:
+        return _weighted_pick(bucket3)
+
+    bucket4 = [r for r in base if (is_any_hazard(r) and sev_is_wild(r))]
+    if bucket4:
+        return _weighted_pick(bucket4)
+
+    return ""
 
 
 def list_matching_care_texts(
@@ -347,14 +460,16 @@ def list_matching_care_texts(
     kind: str = "",
 ) -> List[str]:
     """
-    Returns all unique matching care texts (used for Remix).
+    Returns all unique matching care texts using the SAME rules as pick_care_statement,
+    but without weighting (used for Remix).
     """
     plat = _cs_norm_platform(platform)
     if not plat:
         return []
 
     sev = _cs_norm(severity)
-    haz = _cs_lower(hazard)
+    haz = _hazard_key(hazard)
+    haz = _HAZARD_ALIAS.get(haz, haz)
     knd = _cs_lower(kind)
 
     has_kind_col = any(("kind" in (r or {})) for r in (rows or []))
@@ -365,26 +480,35 @@ def list_matching_care_texts(
     for r in rows or []:
         if not _cs_is_true((r or {}).get("enabled")):
             continue
-
-        r_plat = _cs_norm_platform((r or {}).get("platform"))
-        if r_plat != plat:
-            continue
-
-        r_haz = _cs_lower((r or {}).get("hazard"))
-        if r_haz not in ("", "any", haz):
-            continue
-
-        r_sev = _cs_norm((r or {}).get("severity"))
-        if r_sev and sev and r_sev != sev:
+        if _cs_norm_platform((r or {}).get("platform")) != plat:
             continue
 
         if has_kind_col and knd:
-            r_kind = _cs_lower((r or {}).get("kind"))
-            if r_kind not in ("", "any", knd):
+            rk = _cs_row_kind(r)
+            if rk not in ("", "any", knd):
                 continue
 
-        txt = _cs_norm((r or {}).get("variant text"))
-        if txt and txt not in seen:
+        txt = _cs_text(r)
+        if not txt:
+            continue
+
+        rh_raw = _cs_lower((r or {}).get("hazard"))
+        rhk = _cs_row_hazard_key(r)
+        haz_ok = False
+        if not haz:
+            haz_ok = (rh_raw in ("", "any")) or (rhk == "")
+        else:
+            haz_ok = (rh_raw in ("", "any")) or (rhk == haz)
+
+        if not haz_ok:
+            continue
+
+        rs = _cs_row_sev(r)
+        sev_ok = (rs == "") or (bool(sev) and rs == sev)
+        if not sev_ok:
+            continue
+
+        if txt not in seen:
             out.append(txt)
             seen.add(txt)
 
@@ -414,695 +538,6 @@ def pick_remixed_care_text(
     idx = abs(int(remix_count)) % len(candidates)
     return candidates[idx].strip()
 
-
-# =============================================================================
-# Helper: normalize text for stable comparisons
-# =============================================================================
-def normalize(s: str) -> str:
-    if not s:
-        return ""
-    s = s.lower()
-    s = s.replace("–", "-").replace("—", "-")
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def safe_int(x: Any, default: int) -> int:
-    try:
-        return int(x)
-    except Exception:
-        return default
-
-
-def text_hash(s: str) -> str:
-    return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
-
-# ---------------------------------------------------------------------
-# ENDED / ALL-CLEAR detection (keeps core logic intact)
-# ---------------------------------------------------------------------
-_ENDED_PHRASES = (
-    " no longer in effect",
-    " is no longer in effect",
-    " has ended",
-    " ended",
-)
-
-def is_alert_ended(title: str, summary: str) -> bool:
-    """
-    Returns True when Environment Canada issues an 'ended' / 'no longer in effect' entry.
-    This does NOT change warning/watch/advisory wording. It's just a state detector.
-    """
-    t = f"{title or ''} {summary or ''}".lower()
-    return any(p in t for p in _ENDED_PHRASES)
-
-# =============================================================================
-# Severity emoji (match Environment Canada alert colours)
-# IMPORTANT: DO NOT CHANGE THIS LOGIC (per your instruction)
-# =============================================================================
-def severity_emoji(title: str) -> str:
-    """
-    Environment Canada colour-coded alerts:
-      Yellow = 🟡
-      Orange = 🟠
-      Red    = 🔴
-    If not colour-coded, return "" (no emoji).
-    """
-    t = (title or "").strip().lower()
-
-    # Prefer explicit colour words first (EC banner titles)
-    if t.startswith("red "):
-        return "🔴"
-    if t.startswith("orange "):
-        return "🟠"
-    if t.startswith("yellow "):
-        return "🟡"
-
-    return ""
-
-
-def classify_alert_kind(title: str) -> str:
-    """
-    Used for cooldown bucket AND Telegram gate policy.
-    """
-    t = (title or "").lower()
-    if "warning" in t:
-        return "warning"
-    if "watch" in t:
-        return "watch"
-    if "advisory" in t:
-        return "advisory"
-    if "statement" in t:
-        return "statement"
-    return "other"
-
-
-# =============================================================================
-# State file (dedupe/cooldowns/telegram gate memory)
-# =============================================================================
-def load_state() -> dict:
-    default = {
-        "seen_ids": [],
-        "posted_guids": [],
-        "posted_text_hashes": [],
-        "cooldowns": {},
-        "global_last_post_ts": 0,
-
-        # Telegram gate state
-        "pending_approvals": {},
-        "approval_decisions": {},
-        "telegram_last_update_id": 0,
-        "telegram_last_signal": None,
-        "test_gate_token": "",
-
-        # for remix/custom refresh bookkeeping
-        "telegram_last_remix_seen": {},
-    }
-
-    if not os.path.exists(STATE_PATH):
-        return default
-
-    try:
-        raw = open(STATE_PATH, "r", encoding="utf-8").read().strip()
-        if not raw:
-            return default
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            return default
-    except Exception:
-        return default
-
-    for k, v in default.items():
-        data.setdefault(k, v)
-    return data
-
-
-def save_state(state: dict) -> None:
-    state["seen_ids"] = state.get("seen_ids", [])[-5000:]
-    state["posted_guids"] = state.get("posted_guids", [])[-5000:]
-    state["posted_text_hashes"] = state.get("posted_text_hashes", [])[-5000:]
-
-    cds = state.get("cooldowns", {})
-    if isinstance(cds, dict) and len(cds) > 5000:
-        items = sorted(cds.items(), key=lambda kv: kv[1], reverse=True)[:4000]
-        state["cooldowns"] = dict(items)
-
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-
-
-# =============================================================================
-# Cooldown logic
-# =============================================================================
-def group_key_for_cooldown(area_name: str, kind: str) -> str:
-    raw = f"{normalize(area_name)}|{normalize(kind)}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-
-def cooldown_allows_post(state: Dict[str, Any], area_name: str, kind: str) -> Tuple[bool, str]:
-    now_ts = int(time.time())
-
-    last_global = safe_int(state.get("global_last_post_ts", 0), 0)
-    if last_global and (now_ts - last_global) < (GLOBAL_COOLDOWN_MINUTES * 60):
-        return False, f"Global cooldown active ({GLOBAL_COOLDOWN_MINUTES}m)."
-
-    key = group_key_for_cooldown(area_name, kind)
-    cooldowns = state.get("cooldowns", {}) if isinstance(state.get("cooldowns"), dict) else {}
-    last_ts = safe_int(cooldowns.get(key, 0), 0)
-
-    mins = COOLDOWN_MINUTES.get(kind, COOLDOWN_MINUTES["default"])
-    if last_ts and (now_ts - last_ts) < (mins * 60):
-        return False, f"Cooldown active for group ({mins}m)."
-
-    return True, "OK"
-
-
-def mark_posted(state: Dict[str, Any], area_name: str, kind: str) -> None:
-    now_ts = int(time.time())
-    key = group_key_for_cooldown(area_name, kind)
-    state.setdefault("cooldowns", {})
-    state["cooldowns"][key] = now_ts
-    state["global_last_post_ts"] = now_ts
-
-
-# =============================================================================
-# "More:" URL resolver
-# =============================================================================
-def _url_looks_ok(url: str) -> bool:
-    url = (url or "").strip()
-    if not url:
-        return False
-    try:
-        r = requests.head(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
-        if r.status_code < 400:
-            return True
-    except Exception:
-        pass
-    try:
-        r = requests.get(url, allow_redirects=True, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
-        return r.status_code < 400
-    except Exception:
-        return False
-
-
-def resolve_more_info_url() -> str:
-    if TAY_ALERTS_URL:
-        return TAY_ALERTS_URL
-    return TAY_COORDS_URL
-
-
-# =============================================================================
-# ATOM feed parsing
-# =============================================================================
-ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
-
-
-def _parse_atom_dt(s: str) -> dt.datetime:
-    if not s:
-        return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
-    return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
-def fetch_feed_entries(feed_url: str, retries: int = 3, timeout: Tuple[int, int] = (5, 20)) -> List[Dict[str, Any]]:
-    last_err: Optional[Exception] = None
-
-    def _parse_rss_dt(s: str) -> dt.datetime:
-        s = (s or "").strip()
-        if not s:
-            return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
-        try:
-            parsed = email.utils.parsedate_to_datetime(s)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=dt.timezone.utc)
-            return parsed.astimezone(dt.timezone.utc)
-        except Exception:
-            return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
-
-    for attempt in range(retries):
-        try:
-            r = requests.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-            r.raise_for_status()
-            root = ET.fromstring(r.content)
-
-            entries: List[Dict[str, Any]] = []
-
-            # --- Atom ---
-            if "Atom" in (root.tag or "") or root.tag.endswith("feed"):
-                for e in root.findall("a:entry", ATOM_NS):
-                    title = (e.findtext("a:title", default="", namespaces=ATOM_NS) or "").strip()
-
-                    link = ""
-                    link_el = e.find("a:link[@type='text/html']", ATOM_NS)
-                    if link_el is None:
-                        link_el = e.find("a:link", ATOM_NS)
-                    if link_el is not None:
-                        link = (link_el.get("href") or "").strip()
-
-                    updated = (e.findtext("a:updated", default="", namespaces=ATOM_NS) or "").strip()
-                    published = (e.findtext("a:published", default="", namespaces=ATOM_NS) or "").strip()
-                    entry_id = (e.findtext("a:id", default="", namespaces=ATOM_NS) or "").strip()
-                    summary = (e.findtext("a:summary", default="", namespaces=ATOM_NS) or "").strip()
-
-                    entries.append(
-                        {
-                            "id": entry_id,
-                            "title": title,
-                            "link": link,
-                            "summary": summary,
-                            "updated_dt": _parse_atom_dt(updated or published),
-                        }
-                    )
-
-            # --- RSS 2.0 ---
-            else:
-                ch = root.find("channel") if root.tag == "rss" else root.find(".//channel")
-                if ch is not None:
-                    for it in ch.findall("item"):
-                        title = (it.findtext("title", default="") or "").strip()
-                        link = (it.findtext("link", default="") or "").strip()
-                        guid = (it.findtext("guid", default="") or "").strip()
-                        pub = (it.findtext("pubDate", default="") or "").strip()
-                        desc = (it.findtext("description", default="") or "").strip()
-                        entries.append(
-                            {
-                                "id": guid or link or title,
-                                "title": title,
-                                "link": link,
-                                "summary": desc,
-                                "updated_dt": _parse_rss_dt(pub),
-                            }
-                        )
-
-            entries = [e for e in entries if (e.get("id") or "").strip()]
-            entries.sort(
-                key=lambda x: x.get("updated_dt") or dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc),
-                reverse=True,
-            )
-            return entries
-
-        except Exception as e:
-            last_err = e
-            if attempt < retries - 1:
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise
-
-    raise last_err if last_err else RuntimeError("Failed to fetch feed")
-
-
-def atom_title_for_tay(title: str) -> str:
-    if not title:
-        return title
-    t = title.replace(", Midland - Coldwater - Orr Lake", f" ({DISPLAY_AREA_NAME})")
-    t = t.replace("Midland - Coldwater - Orr Lake", DISPLAY_AREA_NAME)
-    return t
-
-
-def normalize_alert_title(title: str) -> str:
-    t = (title or "").strip()
-    t = t.replace("–", "-").replace("—", "-")
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
-
-# =============================================================================
-# Environment Canada detail extraction
-# =============================================================================
-def _extract_details_lines_from_ec(official_url: str) -> List[str]:
-    """
-    Extracts short 'What' and 'When' lines from the official Environment Canada alert page.
-    Falls back to a short weather-related sentence if structured fields aren't found.
-    """
-    official_url = (official_url or "").strip()
-    if not official_url:
-        return []
-
-    r = requests.get(official_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
-    r.raise_for_status()
-
-    soup = BeautifulSoup(r.text, "html.parser")
-    raw = soup.get_text("\n")
-    lines = [ln.strip() for ln in raw.splitlines()]
-    lines = [ln for ln in lines if ln]
-    text = " ".join(lines)
-
-    def _clean_details(s: str) -> str:
-        s = re.sub(r"\s+", " ", (s or "")).strip()
-        if not s:
-            return ""
-        if re.match(r"^\s*issued\b", s, flags=re.IGNORECASE):
-            return ""
-        if "bookmarking your customized list" in s.lower():
-            return ""
-        if "continue to monitor" in s.lower():
-            return ""
-        if "share this page" in s.lower():
-            return ""
-        return s
-
-    m_what = re.search(r"What:\s*(.+?)(?=\s+(When:|Where:|Additional information:))", text, re.IGNORECASE)
-    m_when = re.search(r"When:\s*(.+?)(?=\s+(Where:|Additional information:)|$)", text, re.IGNORECASE)
-
-    out: List[str] = []
-    if m_what:
-        what = _clean_details(m_what.group(1))
-        if what:
-            out.append(what.rstrip(".") + ".")
-    if m_when:
-        when = _clean_details(m_when.group(1))
-        if when:
-            out.append(when.rstrip(".") + ".")
-
-    if out:
-        return out[:2]
-
-    # Fallback: pick the first decent weather-related sentence
-    weather_keywords = (
-        "snow", "snowfall", "squall", "rain", "freezing", "ice", "wind", "fog",
-        "visibility", "blowing", "drifting", "thunder", "heat", "cold",
-    )
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    for s in sentences[:140]:
-        s = s.strip()
-        if 25 <= len(s) <= 240 and any(k in s.lower() for k in weather_keywords):
-            sl = s.lower()
-            if "environment canada" in sl or "continue to monitor" in sl:
-                continue
-            candidate = _clean_details(s)
-            if candidate:
-                return [candidate.rstrip(".") + "."]
-    return []
-
-
-def _extract_recommended_action_from_ec(official_url: str) -> str:
-    """
-    Pulls the 'Recommended action:' section from the official Environment Canada alert page, when present.
-    Returns a single string (empty if not found).
-    """
-    official_url = (official_url or "").strip()
-    if not official_url:
-        return ""
-
-    r = requests.get(official_url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
-    r.raise_for_status()
-
-    soup = BeautifulSoup(r.text, "html.parser")
-    raw = soup.get_text("\n")
-    lines = [ln.strip() for ln in raw.splitlines()]
-    lines = [ln for ln in lines if ln]
-    text = " ".join(lines)
-
-    def _clean_action(s: str) -> str:
-        s = re.sub(r"\s+", " ", (s or "")).strip()
-        if not s:
-            return ""
-        if "bookmarking your customized list" in s.lower():
-            return ""
-        if "share this page" in s.lower():
-            return ""
-        return s
-
-    # Common label on EC pages: "Recommended action:"
-    m = re.search(
-        r"(Recommended action[s]?:)\s*(.+?)(?=\s+(What:|When:|Where:|Additional information:|$))",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return ""
-
-    action = _clean_action(m.group(2))
-    action = action.strip("•-–— \t")
-    return action
-
-
-# =============================================================================
-# Google Sheet + Google Drive integration
-# =============================================================================
-def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
-    """
-    Supports both auth styles:
-      A) Legacy: GOOGLE_SERVICE_ACCOUNT_JSON (inline JSON)
-      B) GitHub Actions auth@v2: GOOGLE_APPLICATION_CREDENTIALS (path to JSON file)
-    Also supports CARE_SHEET_ID in addition to GOOGLE_SHEET_ID.
-    """
-    # Sheet ID: prefer CARE_SHEET_ID, fallback to GOOGLE_SHEET_ID
-    sheet_id = (os.getenv("CARE_SHEET_ID") or os.getenv("GOOGLE_SHEET_ID") or "").strip()
-
-    # Drive folder ID (leave as-is if you're already using this)
-    drive_folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
-
-    # Credentials: prefer inline JSON, otherwise use credentials file path
-    sa_json = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
-
-    creds = None
-    if sa_json:
-        info = json.loads(sa_json)
-        creds = service_account.Credentials.from_service_account_info(
-            info,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets.readonly",
-                "https://www.googleapis.com/auth/drive.readonly",
-            ],
-        )
-    else:
-        # GitHub auth@v2 writes a creds file and sets GOOGLE_APPLICATION_CREDENTIALS
-        cred_path = (
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            or os.getenv("CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE")
-            or os.getenv("GOOGLE_GHA_CREDS_PATH")
-            or ""
-        ).strip()
-
-        if cred_path and os.path.exists(cred_path):
-            creds = service_account.Credentials.from_service_account_file(
-                cred_path,
-                scopes=[
-                    "https://www.googleapis.com/auth/spreadsheets.readonly",
-                    "https://www.googleapis.com/auth/drive.readonly",
-                ],
-            )
-
-    if not sheet_id or creds is None:
-        return None, None, "", drive_folder_id
-
-    sheets_svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
-    drive_svc = build("drive", "v3", credentials=creds, cache_discovery=False)
-    return sheets_svc, drive_svc, sheet_id, drive_folder_id
-
-def load_care_statements_rows() -> List[dict]:
-    """
-    Loads CareStatements tab as row dicts using the actual schema you posted:
-
-      enabled | hazard | severity | platform | weight | variant text
-
-    Notes:
-    - Extra trailing columns (like old leftover numbers) are ignored because we map by header.
-    - Header matching is case-insensitive.
-    """
-    sheets_svc, _, sheet_id, _ = _google_services()
-    if not sheets_svc or not sheet_id:
-        return []
-
-    tab = (os.getenv("CARE_SHEET_TAB") or "CareStatements").strip()
-    rng = f"{tab}!A:Z"
-    resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
-    values = resp.get("values", []) or []
-    if len(values) < 2:
-        return []
-
-    raw_headers = values[0]
-    headers = [(str(h).strip().lower() if h is not None else "") for h in raw_headers]
-
-    rows: List[dict] = []
-    for v in values[1:]:
-        if not any((str(x).strip() if x is not None else "") for x in v):
-            continue
-        row: Dict[str, Any] = {}
-        for i, h in enumerate(headers):
-            if not h:
-                continue
-            row[h] = v[i] if i < len(v) else ""
-        rows.append(row)
-
-    return rows
-
-
-def _cs_get(row: dict, key: str) -> str:
-    return ("" if row is None else str(row.get(key, "") or "")).strip()
-
-
-def _cs_truthy(v: Any) -> bool:
-    return (str(v).strip().lower() in ("true", "1", "yes", "y", "on"))
-
-
-def _cs_norm_platform(p: str) -> str:
-    t = (p or "").strip().lower()
-    if t in ("fb", "facebook", "meta"):
-        return "FB"
-    if t in ("x", "twitter"):
-        return "X"
-    t2 = (p or "").strip().upper()
-    if t2 in ("FB", "X"):
-        return t2
-    return ""
-
-
-def _cs_int_weight(v: Any, default: int = 1) -> int:
-    try:
-        w = int(str(v).strip())
-        return max(1, w)
-    except Exception:
-        return default
-
-
-def extract_hazard_from_title(title: str) -> str:
-    """
-    Attempts to extract hazard label from an EC banner-style title like:
-      "Yellow Advisory - Snowfall"
-      "Red Warning - Freezing rain"
-    Returns "" if not parseable.
-    """
-    t = (title or "").strip()
-    m = re.match(r"^(yellow|orange|red)\s+(warning|watch|advisory)\s*-\s*(.+)$", t, flags=re.IGNORECASE)
-    if not m:
-        return ""
-    haz = (m.group(3) or "").strip()
-    return haz
-
-
-def pick_care_statement(
-    care_rows: List[dict],
-    severity_emoji_value: str,
-    hazard: str,
-    platform: str = "FB",
-) -> str:
-    """
-    Returns ONE care statement (or "") using your schema:
-
-      enabled | hazard | severity | platform | weight | variant text
-
-    Matching rules:
-    - enabled must be truthy (if missing/blank -> treated as enabled)
-    - platform must match (FB or X)
-    - hazard must match exact (case-insensitive) OR row hazard == "any"
-    - severity must match exact emoji (🟡🟠🔴🟢 etc) OR row severity blank (wildcard)
-    - weighted random selection using weight (default 1)
-    """
-    plat = _cs_norm_platform(platform)
-    if not plat:
-        return ""
-
-    want_haz = (hazard or "").strip().lower()
-    want_sev = (severity_emoji_value or "").strip()
-
-    candidates: List[dict] = []
-
-    for r in (care_rows or []):
-        enabled_raw = _cs_get(r, "enabled")
-        if enabled_raw != "" and not _cs_truthy(enabled_raw):
-            continue
-
-        r_plat = _cs_norm_platform(_cs_get(r, "platform"))
-        if r_plat != plat:
-            continue
-
-        r_haz = _cs_get(r, "hazard").lower()
-        if r_haz not in ("any", want_haz):
-            continue
-
-        r_sev = _cs_get(r, "severity")
-        if r_sev and want_sev and r_sev != want_sev:
-            continue
-
-        txt = _cs_get(r, "variant text")
-        if not txt:
-            continue
-
-        candidates.append(r)
-
-    if not candidates:
-        return ""
-
-    weighted: List[dict] = []
-    for r in candidates:
-        w = _cs_int_weight(_cs_get(r, "weight"), default=1)
-        weighted.extend([r] * w)
-
-    chosen = random.choice(weighted) if weighted else random.choice(candidates)
-    return _cs_get(chosen, "variant text")
-
-
-def list_matching_care_texts(
-    care_rows: List[dict],
-    severity_emoji_value: str,
-    hazard: str,
-    platform: str = "FB",
-) -> List[str]:
-    """
-    Returns all unique matching care texts (used for Remix).
-    Same matching rules as pick_care_statement().
-    """
-    plat = _cs_norm_platform(platform)
-    if not plat:
-        return []
-
-    want_haz = (hazard or "").strip().lower()
-    want_sev = (severity_emoji_value or "").strip()
-
-    out: List[str] = []
-    seen = set()
-
-    for r in (care_rows or []):
-        enabled_raw = _cs_get(r, "enabled")
-        if enabled_raw != "" and not _cs_truthy(enabled_raw):
-            continue
-
-        r_plat = _cs_norm_platform(_cs_get(r, "platform"))
-        if r_plat != plat:
-            continue
-
-        r_haz = _cs_get(r, "hazard").lower()
-        if r_haz not in ("any", want_haz):
-            continue
-
-        r_sev = _cs_get(r, "severity")
-        if r_sev and want_sev and r_sev != want_sev:
-            continue
-
-        txt = _cs_get(r, "variant text")
-        if txt and txt not in seen:
-            out.append(txt)
-            seen.add(txt)
-
-    return out
-
-
-def pick_remixed_care_text(
-    care_rows: List[dict],
-    severity_emoji_value: str,
-    hazard: str,
-    current_care_text: str,
-    remix_count: int,
-    platform: str = "FB",
-) -> str:
-    candidates = list_matching_care_texts(
-        care_rows=care_rows,
-        severity_emoji_value=severity_emoji_value,
-        hazard=hazard,
-        platform=platform,
-    )
-
-    cur = (current_care_text or "").strip()
-    if cur:
-        filtered = [c for c in candidates if c.strip() != cur]
-        if filtered:
-            candidates = filtered
-
-    if not candidates:
-        return cur
-
-    idx = abs(int(remix_count)) % len(candidates)
-    return candidates[idx].strip()
-    
 
 # =============================================================================
 # Google Drive curated photos (FIRST choice for images)
@@ -1749,8 +1184,6 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
         - Care is appended even if Recommended action exists
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
-    official = (entry.get("link") or "").strip()
-
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
 
     title_line = f"{sev} {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
@@ -1772,20 +1205,15 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("")
     parts.extend(details_lines[:3])
 
-    action_applied = False
-    care_applied = False
-
     if recommended_action.strip():
         parts.append("")
         parts.append("Recommended action:")
         ra = recommended_action.strip().rstrip(".")
         parts.append(f"• {ra}.")
-        action_applied = True
 
     if care.strip():
         parts.append("")
         parts.append(care.strip())
-        care_applied = True
 
     if custom_fb.strip():
         parts.append("")
@@ -1795,11 +1223,6 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("Environment Canada")
     parts.append(f"More: {more_url}")
     parts.append("#TayTownship #ONStorm")
-
-    print(
-        f"FB build: action={'yes' if action_applied else 'no'}, "
-        f"care_applied={'yes' if care_applied else 'no'}"
-    )
 
     return "\n".join(parts).strip()
 
@@ -1950,15 +1373,18 @@ def main() -> None:
             
             # Map workflow choices -> (EC-style title used for classification, hazard label for care matching)
             sample_map = {
-                "orange_snowfall_warning": ("Snowfall Warning", "Snowfall"),
-                "red_tornado_warning": ("Tornado Warning", "Tornado"),
-                "red_winter_storm_warning": ("Winter Storm Warning", "Winter storm"),
-                "yellow_weather_advisory": ("Weather Advisory", "Weather"),
-                "rainfall_warning": ("Rainfall Warning", "Rainfall"),
-                "wind_warning": ("Wind Warning", "Wind"),
-                "heat_warning": ("Heat Warning", "Heat"),
-                "special_weather_statement": ("Special Weather Statement", "Special Weather Statement"),
+                "orange_snowfall_warning": ("Orange Warning - Snowfall", "snowfall"),
+                "red_tornado_warning": ("Red Warning - Tornado", "tornado"),
+                "red_winter_storm_warning": ("Red Warning - Winter storm", "winter_storm"),
+                "yellow_weather_advisory": ("Yellow Advisory - Weather", "weather"),
+                "rainfall_warning": ("Orange Warning - Rainfall", "rainfall"),
+                "wind_warning": ("Yellow Warning - Wind", "wind"),
+                "heat_warning": ("Orange Warning - Heat", "heat"),
+                "special_weather_statement": ("Yellow Statement - Special weather statement", "special_weather_statement"),
+                "yellow_cold_warning": ("Yellow Warning - Cold", "cold"),
+                "red_extreme_cold_warning": ("Red Warning - Extreme cold", "cold"),  # tests aliasing
             }
+
             
             title_for_sample, hazard_for_sample = sample_map.get(
                 sample_key, ("Weather Advisory", "Weather")
@@ -1989,7 +1415,7 @@ def main() -> None:
                         care_rows,
                         platform="FB",
                         severity=sev,
-                        hazard=hazard_for_sample,
+                        hazard=hazard_for_sample,   # now already a key like "cold"
                         kind=kind_for_buttons,
                     )
                     print(
@@ -2206,15 +1632,21 @@ def main() -> None:
         if care_rows:
             try:
                 care_severity = "🟢" if ended else sev
-                hazard_label = extract_hazard_from_title(title_raw) or "any"
-                care = pick_care_statement(care_rows, care_severity, hazard_label, platform="FB")
-
-
-                if care:
-                    print(f"CareStatements: matched ({care_severity} / {type_label})")
-                else:
-                    print(f"CareStatements: no match for ({care_severity} / {type_label})")
+                hazard_key = hazard_for_care(title_raw)  # normalized + extreme_cold->cold alias
+                care = pick_care_statement(
+                    care_rows,
+                    platform="FB",
+                    severity=care_severity,
+                    hazard=hazard_key,
+                    kind=alert_kind,
+                )
+        
+                print(
+                    f"CareStatements: lookup (FB / haz='{hazard_key or 'ANY'}' / sev='{care_severity}' / kind='{alert_kind}') "
+                    f"=> {'yes' if bool(care.strip()) else 'no'}"
+                )
                 print("CareStatements: chosen text:", (care[:120] + "…") if care and len(care) > 120 else care)
+        
             except Exception as e:
                 print(f"⚠️ Care statement match failed: {e}")
                 care = ""
@@ -2270,14 +1702,15 @@ def main() -> None:
 
                 if care_rows and (current_remix != last_seen):
                     try:
-                        hazard_label = extract_hazard_from_title(title_raw) or "any"
+                        hazard_key = hazard_for_care(title_raw)
                         care2 = pick_remixed_care_text(
                             care_rows=care_rows,
-                            severity_emoji_value=care_colour_for_sheet,
-                            hazard=hazard_label,
+                            platform="FB",
+                            severity=care_colour_for_sheet,
+                            hazard=hazard_key,
+                            kind=alert_kind,
                             current_care_text=care,
                             remix_count=current_remix,
-                            platform="FB",
                         )
 
                     except Exception as e:
