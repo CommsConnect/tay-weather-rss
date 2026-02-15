@@ -1947,48 +1947,33 @@ def main() -> None:
             # Sample alert selection comes from workflow input: SAMPLE_ALERT
             # -----------------------------------------------------------------
             sample_key = (os.getenv("SAMPLE_ALERT") or "").strip().lower()
-
-            # Map workflow choices -> (EC-style title, hazard label for care matching)
+            
+            # Map workflow choices -> (EC-style title used for classification, hazard label for care matching)
             sample_map = {
-                "orange_snowfall_warning": ("Orange Warning - Snowfall", "Snowfall"),
-                "red_tornado_warning": ("Red Warning - Tornado", "Tornado"),
-                "red_winter_storm_warning": ("Red Warning - Winter storm", "Winter storm"),
-                "yellow_weather_advisory": ("Yellow Advisory - Weather", "Weather"),
-                "rainfall_warning": ("Red Warning - Rainfall", "Rainfall"),
-                "wind_warning": ("Red Warning - Wind", "Wind"),
-                "heat_warning": ("Red Warning - Heat", "Heat"),
-                "special_weather_statement": ("Special weather statement", "Special weather statement"),
+                "orange_snowfall_warning": ("Snowfall Warning", "Snowfall"),
+                "red_tornado_warning": ("Tornado Warning", "Tornado"),
+                "red_winter_storm_warning": ("Winter Storm Warning", "Winter storm"),
+                "yellow_weather_advisory": ("Weather Advisory", "Weather"),
+                "rainfall_warning": ("Rainfall Warning", "Rainfall"),
+                "wind_warning": ("Wind Warning", "Wind"),
+                "heat_warning": ("Heat Warning", "Heat"),
+                "special_weather_statement": ("Special Weather Statement", "Special Weather Statement"),
             }
-
+            
             title_for_sample, hazard_for_sample = sample_map.get(
-                sample_key, ("Yellow Advisory - Snowfall", "Snowfall")
+                sample_key, ("Weather Advisory", "Weather")
             )
-
-            # --- TEST SAMPLE ALERT: build title directly from SAMPLE_ALERT ---
-            sample_key = (SAMPLE_ALERT or "").strip()
-            
-            SAMPLE_ALERT_TITLES = {
-                "orange_snowfall_warning": "Snowfall Warning",
-                "red_tornado_warning": "Tornado Warning",
-                "red_winter_storm_warning": "Winter Storm Warning",
-                "yellow_weather_advisory": "Weather Advisory",
-                "rainfall_warning": "Rainfall Warning",
-                "wind_warning": "Wind Warning",
-                "heat_warning": "Heat Warning",
-                "special_weather_statement": "Special Weather Statement",
-            }
-            
-            hazard_title = SAMPLE_ALERT_TITLES.get(sample_key, "Special Weather Statement")
             
             fake_entry = {
                 "id": f"test-sample-{token}",
-                "title": f"{hazard_title}",  # <-- THIS drives classify_alert_kind
+                "title": title_for_sample,   # drives classify_alert_kind
                 "link": TAY_COORDS_URL,
                 "summary": f"Test sample alert ({sample_key or 'default'}; no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
             
-            print(f"TEST SAMPLE → key={sample_key} title='{hazard_title}'")
+            print(f"TEST SAMPLE → key={sample_key} title='{title_for_sample}' hazard='{hazard_for_sample}'")
+
 
 
             # compute care for the sample alert preview
