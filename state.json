@@ -260,6 +260,10 @@
     "555b1995e4": {
       "decision": "denied",
       "decided_at": "2026-02-14T23:20:42Z"
+    },
+    "cce71bdc6a": {
+      "decision": "denied",
+      "decided_at": "2026-02-15T15:08:55Z"
     }
   },
   "cooldowns": {
@@ -387,9 +391,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933400,
+  "telegram_last_update_id": 259933401,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "555b1995e4"
+  "test_gate_token": "cce71bdc6a"
 }
