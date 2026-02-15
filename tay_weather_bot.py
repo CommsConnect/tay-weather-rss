@@ -1718,7 +1718,7 @@ def main() -> None:
                 f"TOKEN: {token}"
             )
             kind_for_buttons = "other"
-                else:
+        else:
             fake_entry = {
                 "id": f"test-sample-{token}",
                 "title": "Yellow Advisory - Snowfall",
