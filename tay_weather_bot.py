@@ -1718,11 +1718,13 @@ def main() -> None:
                 f"TOKEN: {token}"
             )
             kind_for_buttons = "other"
-        else:
+                else:
             fake_entry = {
                 "id": f"test-sample-{token}",
                 "title": "Yellow Advisory - Snowfall",
-                "link": TAY_COORDS_URL,
+                # IMPORTANT: keep More: pointing to your public short URL
+                # but do NOT use it as the "official alert page" for parsing action/details
+                "link": "",  # <--- critical change: prevents Recommended action from suppressing care
                 "summary": "Test sample alert (no post).",
                 "updated_dt": dt.datetime.now(dt.timezone.utc),
             }
@@ -1739,7 +1741,7 @@ def main() -> None:
                 care_rows = []
 
             title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
-            type_label = classify_alert_kind(title_raw)   # warning/watch/advisory/...
+            type_label = classify_alert_kind(title_raw)
             sev = severity_emoji(title_raw)
 
             care = ""
@@ -1756,8 +1758,17 @@ def main() -> None:
             # X stays clean in test previews
             x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
 
-            # FB gets care in test previews
+            # FB gets care in test previews (and can't be overridden by Recommended action now)
             fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
+
+            # Extra safety: if care exists but still didn't land in the FB text, force-append it
+            if care and (care.strip() not in fb_text):
+                fb_text = fb_text.replace(
+                    "\n\nEnvironment Canada\n",
+                    f"\n\n{care.strip()}\n\nEnvironment Canada\n",
+                    1,
+                )
+                print("CareStatements(TEST): force-appended care (was suppressed or missing).")
 
             preview_text = (
                 f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
