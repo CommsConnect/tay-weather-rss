@@ -182,6 +182,27 @@ def _no_post_guard(platform: str) -> bool:
         return True
     return False
 
+def resolve_more_info_url() -> str:
+    """
+    Returns the public "More info" URL to include in posts.
+
+    Priority:
+      1) TAY_COORDS_URL (your short link)
+      2) MORE_INFO_URL (legacy/alternate env)
+      3) Fallback to the EC coords page (Tay Township)
+    """
+    url = (os.getenv("TAY_COORDS_URL") or "").strip()
+    if url:
+        return url
+
+    url = (os.getenv("MORE_INFO_URL") or "").strip()
+    if url:
+        return url
+
+    # Hard fallback (should rarely be used if TAY_COORDS_URL is set)
+    return "https://weather.gc.ca/en/location/index.html?coords=44.751,-79.768"
+
+
 # =============================================================================
 # Care Statements (Facebook/X) — Google Sheet loader + weighted picker
 #
