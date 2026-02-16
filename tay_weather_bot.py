@@ -30,6 +30,7 @@ import json
 import os
 import re
 import time
+import random  # ✅ REQUIRED for weighted selection
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
@@ -647,47 +648,43 @@ def load_care_statements_rows() -> List[dict]:
         rows.append(row)
     return rows
 
-
 # -----------------------------
 # CareStatements selector
 # Supports your sheet schema:
 #   enabled | hazard | severity | platform | weight | variant text
 # -----------------------------
-    def enabled(r: dict) -> bool:
-        """
-        Treat enabled as TRUE unless explicitly false.
+def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, platform: str = "FB") -> str:
+    """
+    Returns one care statement chosen by:
+      - severity colour (🟡 🟠 🔴 🟢) when present
+      - hazard bucket (e.g., "snowfall", "rainfall", "wind") when present
+      - platform ("FB" vs "X") when present
+      - weighted random selection using 'weight'
 
-        Why:
-        - Google Sheets can return TRUE/FALSE strings for checkboxes
-        - But numeric sheets often return 1 / 0 or even 1.0 / 0.0
-        - The previous logic mistakenly treated '1.0' as disabled
-        """
-        raw = _get_first(r, ["enabled", "active", "use"])
-
-        # If the column is missing/blank, default to enabled
-        if raw is None:
-            return True
-        s = str(raw).strip().lower()
-        if s == "":
-            return True
-
-        # Explicit false values
-        if s in ("false", "no", "0", "0.0", "n", "off"):
-            return False
-
-        # Explicit true values (including numeric floats-as-strings)
-        if s in ("true", "yes", "1", "1.0", "y", "on"):
-            return True
-
-        # If it's some other weird value, be conservative: treat as enabled
-        return True
-
+    Sheet columns supported (case-insensitive):
+      enabled | hazard | severity | platform | weight | variant text
+    """
 
     def _get_first(r: dict, keys: List[str]) -> str:
         for k in keys:
             if k in r and str(r.get(k, "")).strip() != "":
                 return str(r.get(k, "")).strip()
         return ""
+
+    def enabled(r: dict) -> bool:
+        """
+        Treat enabled as TRUE unless explicitly false.
+        Handles: TRUE/FALSE, yes/no, 1/0, 1.0/0.0, actual booleans.
+        """
+        raw = _get_first(r, ["enabled", "active", "use"])
+        if raw == "":
+            return True
+        s = str(raw).strip().lower()
+        if s in ("false", "no", "0", "0.0", "n", "off"):
+            return False
+        if s in ("true", "yes", "1", "1.0", "y", "on"):
+            return True
+        return True
 
     def norm_colour(c: str) -> str:
         c = (c or "").strip().lower()
@@ -714,24 +711,24 @@ def load_care_statements_rows() -> List[dict]:
         return p
 
     def norm_hazard_bucket(s: str) -> str:
-        # NOTE: sheet uses 'hazard' column (often 'any') as the bucket.
         s = (s or "").strip().lower()
-        if not s:
-            return ""
         return s
 
-    want_bucket = norm_hazard_bucket(alert_type)  # <- hazard bucket key
-    want_colour = norm_colour((colour or "").strip())
+    want_bucket = norm_hazard_bucket(alert_type)
+    want_colour = norm_colour(colour)
     want_platform = norm_platform(platform)
 
     enabled_count = sum(1 for r in (care_rows or []) if enabled(r))
-    print(f"CareStatements(DEBUG): rows={len(care_rows or [])} enabled={enabled_count} want=({want_colour} / {want_type} / {want_platform})")
+    print(
+        f"CareStatements(DEBUG): rows={len(care_rows or [])} "
+        f"enabled={enabled_count} want=({want_colour} / {want_bucket} / {want_platform})"
+    )
 
     def row_colour(r: dict) -> str:
         return norm_colour(_get_first(r, ["colour", "color", "severity", "emoji"]))
 
     def row_bucket(r: dict) -> str:
-        return norm_hazard_bucket(_get_first(r, ["type", "alert_type", "kind", "bucket", "hazard"]))
+        return norm_hazard_bucket(_get_first(r, ["hazard", "type", "alert_type", "kind", "bucket"]))
 
     def row_platform(r: dict) -> str:
         return norm_platform(_get_first(r, ["platform", "channel"]))
@@ -770,14 +767,12 @@ def load_care_statements_rows() -> List[dict]:
         if c_req and rc != c_req:
             return False
 
-        # hazard bucket filter:
-        # treat blank/'any' in row as wildcard
+        # hazard bucket filter (row 'any' or blank is wildcard)
         if b_req:
             if rb and rb not in ("any", "*") and rb != b_req:
                 return False
 
-        # platform filter:
-        # treat blank/'any' in row as wildcard
+        # platform filter (row blank/'any' is wildcard)
         if p_req:
             if rp and rp != p_req:
                 return False
@@ -795,8 +790,7 @@ def load_care_statements_rows() -> List[dict]:
         (want_colour, "", ""),
         ("", "", ""),
     ]
-    
-    # Attempt in order: first bucket with at least one candidate wins.
+
     for bc, bb, bp in buckets:
         candidates: List[str] = []
         weights: List[int] = []
@@ -807,7 +801,7 @@ def load_care_statements_rows() -> List[dict]:
             if not matches(r, bc, bb, bp):
                 continue
 
-            txt = row_text(r).strip()
+            txt = (row_text(r) or "").strip()
             if not txt:
                 continue
 
@@ -815,14 +809,15 @@ def load_care_statements_rows() -> List[dict]:
             weights.append(row_weight(r))
 
         if candidates:
-            # Weighted random choice for variety while still respecting your sheet priorities.
+            print(f"CareStatements(DEBUG): matched {len(candidates)} candidates using bucket=({bc}/{bb}/{bp})")
             try:
                 return random.choices(candidates, weights=weights, k=1)[0].strip()
             except Exception:
-                # Defensive fallback (should be rare)
                 return candidates[0].strip()
 
+    print("CareStatements(DEBUG): no candidates matched")
     return ""
+
 
 
 def list_matching_care_texts(care_rows: List[dict], colour: str, alert_type: str, platform: str = "FB") -> List[str]:
@@ -2303,7 +2298,8 @@ def main() -> None:
                 if d == "denied":
                     print(f"🛑 Telegram denied for WARNING token={token}. Skipping.")
                     try:
-                        tg_send_message(f"🛑 DENIED — will NOT post.\nTOKEN: {token}")
+                        headline = f"{'🟢' if ended else severity_emoji(title_raw)} {_pretty_title_for_social(title_raw)}".strip()
+                        tg_send_message(f"🛑 DENIED — {headline}\nWill NOT post.\nTOKEN: {token}")
                     except Exception:
                         pass
                     continue
@@ -2311,7 +2307,8 @@ def main() -> None:
                 if d == "approved":
                     print(f"✅ Telegram approved for WARNING token={token}. Proceeding to post.")
                     try:
-                        tg_send_message(f"✅ APPROVED — proceeding to post now.\nTOKEN: {token}")
+                        headline = f"{'🟢' if ended else severity_emoji(title_raw)} {_pretty_title_for_social(title_raw)}".strip()
+                        tg_send_message(f"✅ APPROVED — {headline}\nTOKEN: {token}")
                     except Exception:
                         pass
                 else:
@@ -2324,7 +2321,8 @@ def main() -> None:
                     if d2 == "denied":
                         print(f"🛑 Telegram denied during delay window (token={token}). Skipping.")
                         try:
-                            tg_send_message(f"🛑 DENIED — will NOT post.\nTOKEN: {token}")
+                            headline = f"{'🟢' if ended else severity_emoji(title_raw)} {_pretty_title_for_social(title_raw)}".strip()
+                            tg_send_message(f"🛑 DENIED — {headline}\nWill NOT post.\nTOKEN: {token}")
                         except Exception:
                             pass
                         continue
@@ -2349,7 +2347,8 @@ def main() -> None:
 
                 print(f"✅ Telegram approved for token={token}. Proceeding to post.")
                 try:
-                    tg_send_message(f"✅ APPROVED — proceeding to post now.\nTOKEN: {token}")
+                    headline = f"{'🟢' if ended else severity_emoji(title_raw)} {_pretty_title_for_social(title_raw)}".strip()
+                    tg_send_message(f"✅ APPROVED — {headline}\nTOKEN: {token}")
                 except Exception:
                     pass
         else:
