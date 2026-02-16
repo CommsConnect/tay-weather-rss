@@ -292,6 +292,10 @@
     "90a298d3f1": {
       "decision": "denied",
       "decided_at": "2026-02-16T23:29:35Z"
+    },
+    "f1a6ebae8a": {
+      "decision": "denied",
+      "decided_at": "2026-02-16T23:45:17Z"
     }
   },
   "cooldowns": {
@@ -421,9 +425,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933410,
+  "telegram_last_update_id": 259933411,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "90a298d3f1"
+  "test_gate_token": "f1a6ebae8a"
 }
