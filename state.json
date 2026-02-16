@@ -280,6 +280,10 @@
     "518c03784c": {
       "decision": "approved",
       "decided_at": "2026-02-16T22:44:59Z"
+    },
+    "440ce306b3": {
+      "decision": "denied",
+      "decided_at": "2026-02-16T23:17:30Z"
     }
   },
   "cooldowns": {
@@ -409,9 +413,9 @@
     "decision": "approved",
     "token": "8a7345cd7a"
   },
-  "telegram_last_update_id": 259933407,
+  "telegram_last_update_id": 259933408,
   "telegram_remix_count": {
     "9e9b11f786": 1
   },
-  "test_gate_token": "c33abc441a"
+  "test_gate_token": "440ce306b3"
 }
