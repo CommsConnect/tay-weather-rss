@@ -1839,18 +1839,26 @@ def main() -> None:
         if not TELEGRAM_ENABLE_GATE:
             print("RUN_MODE is a Telegram test mode, but TELEGRAM_ENABLE_GATE=false. Exiting cleanly.")
             return
-
+    
+        # In test modes we always show a Telegram preview and accept buttons,
+        # but we NEVER post to X/Facebook. This path is used to validate:
+        # - formatting rules (headline + body + closing block)
+        # - care statement selection logic
+        # - Telegram approve/deny/remix/custom mechanics
+        # - image selection logic (CR-29 cameras + bug overlay)
         test_images = resolve_cr29_image_urls()
         st = load_state()
-
+    
+        # Always ingest actions first so we don't ignore fast clicks
         ingest_telegram_actions(st, save_state)
         maybe_send_reminders(st, save_state)
-
+    
+        # Reuse an active token if it exists and is still pending, else create a new one
         token = (st.get("test_gate_token") or "").strip()
         created_at = None
         if token:
             created_at = (st.get("pending_approvals") or {}).get(token, {}).get("created_at")
-
+    
         if (
             (not token)
             or (created_at and is_expired(st, token))
@@ -1859,79 +1867,117 @@ def main() -> None:
             token = hashlib.sha1(f"test:{RUN_MODE}:{dt.datetime.utcnow().isoformat()}".encode("utf-8")).hexdigest()[:10]
             st["test_gate_token"] = token
             save_state(st)
+    
+        # -----------------------------------------------------------------
+        # TEST SAMPLE ALERT: honour workflow_dispatch input SAMPLE_ALERT
+        # -----------------------------------------------------------------
+        sample_key = (os.getenv("SAMPLE_ALERT") or "").strip() or "orange_snowfall_warning"
+        print(f"ENV DEBUG: RUN_MODE={RUN_MODE} | SAMPLE_ALERT raw env='{os.getenv('SAMPLE_ALERT')}' | resolved sample_key='{sample_key}'")
+    
+        # IMPORTANT:
+        # These keys should match .github/workflows/weather.yml options.
+        # Titles are intentionally "Colour Product - Hazard" so your parser
+        # matches Environment Canada’s colour-coded alert structure.
+        sample_title_map = {
+            "orange_snowfall_warning": "Orange Warning - Snowfall",
+            "red_tornado_warning": "Red Warning - Tornado",
+            "red_winter_storm_warning": "Red Warning - Winter Storm",
+            "yellow_weather_advisory": "Yellow Advisory - Weather",
+    
+            "rainfall_warning": "Orange Warning - Rainfall",
+            "wind_warning": "Orange Warning - Wind",
+            "heat_warning": "Orange Warning - Heat",
 
-        if RUN_MODE == "test_telegram_buttons_no_post":
-            preview_text = (
-                "🧪 TEST MODE: Telegram buttons (NO POST)\n\n"
-                "Tap: ✅ Approve / 🛑 Deny / 🔁 Remix / ✏️ Custom\n\n"
-                f"RUN_MODE: {RUN_MODE}\n"
-                f"TOKEN: {token}"
-            )
-            kind_for_buttons = "other"
-        else:
-            fake_entry = {
-                "id": f"test-sample-{token}",
-                "title": "Yellow Advisory - Snowfall",
-                # IMPORTANT: keep More: pointing to your public short URL
-                # but do NOT use it as the "official alert page" for parsing action/details
-                "link": "",  # <--- critical change: prevents Recommended action from suppressing care
-                "summary": "Test sample alert (no post).",
-                "updated_dt": dt.datetime.now(dt.timezone.utc),
-            }
-
-            # --- Load CareStatements for TEST previews (so FB care shows) ---
-            care_rows: List[dict] = []
-            try:
-                care_rows = load_care_statements_rows()
-                print(f"CareStatements(TEST): loaded {len(care_rows)} rows")
-                if care_rows:
-                    print("CareStatements(TEST): sample keys:", sorted(care_rows[0].keys()))
-            except Exception as e:
-                print(f"⚠️ CareStatements(TEST) failed to load: {e}")
-                care_rows = []
-
-            title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
-            type_label = classify_alert_kind(title_raw)  # warning/watch/advisory/statement (for logs)
-            hazard_bucket = _hazard_bucket_key_for_sheet(title_raw)
-            sev = severity_emoji(title_raw)
-
-            care = ""
+            "rain_fall_warning": "Orange Warning - Rainfall",
+            "orange_rainfall_warning": "Orange Warning - Rainfall",
+            "orange_rain_fall_warning": "Orange Warning - Rainfall",
+    
+            # Statements are not colour-coded
+            "special_weather_statement": "Special Weather Statement",
+        }
+    
+        title_for_test = sample_title_map.get(sample_key, "Orange Warning - Snowfall")
+        print(f"TEST SAMPLE: SAMPLE_ALERT={sample_key} -> title='{title_for_test}'")
+    
+        fake_entry = {
+            "id": f"test-sample-{token}",
+            "title": title_for_test,
+    
+            # NOTE:
+            # We intentionally leave link blank in test mode. A real EC link can inject
+            # Recommended action text into the parsed entry, which can make it look like
+            # the care statement logic is failing when it's actually being suppressed by
+            # downstream formatting rules.
+            "link": "",
+    
+            "summary": f"Test sample alert '{sample_key}' (no post).",
+            "updated_dt": dt.datetime.now(dt.timezone.utc),
+        }
+    
+        # -----------------------------------------------------------------
+        # Load CareStatements for TEST previews (so FB care shows in Telegram)
+        # -----------------------------------------------------------------
+        care_rows: List[dict] = []
+        try:
+            care_rows = load_care_statements_rows()
+            print(f"CareStatements(TEST): loaded {len(care_rows)} rows")
             if care_rows:
-                try:
-                    care = pick_care_statement(care_rows, sev, hazard_bucket, platform="FB")
-                    print(f"CareStatements(TEST): match ({sev} / {type_label}) => {'yes' if bool(care) else 'no'}")
-                    if care:
-                        print("CareStatements(TEST): chosen text:", (care[:120] + "…") if len(care) > 120 else care)
-                except Exception as e:
-                    print(f"⚠️ CareStatements(TEST) match failed: {e}")
-                    care = ""
-
-            # X stays clean in test previews
-            x_text = build_x_post_text(fake_entry, more_url=more_url, care=care)
-
-            # FB gets care in test previews (and can't be overridden by Recommended action now)
-            fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
-
-            # Extra safety: if care exists but still didn't land in the FB text, force-append it
-            if care and (care.strip() not in fb_text):
-                fb_text = fb_text.replace(
-                    "\n\nEnvironment Canada\n",
-                    f"\n\n{care.strip()}\n\nEnvironment Canada\n",
-                    1,
-                )
-                print("CareStatements(TEST): force-appended care (was suppressed or missing).")
-
-            preview_text = (
-                f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
-                f"----- X (NO POST) -----\n{x_text}\n\n"
-                f"----- Facebook (NO POST) -----\n{fb_text}\n\n"
-                f"RUN_MODE: {RUN_MODE}\n"
-                f"More:\n{more_url}\n\n"
-                f"TOKEN: {token}"
+                print("CareStatements(TEST): sample keys:", sorted(care_rows[0].keys()))
+        except Exception as e:
+            print(f"⚠️ CareStatements(TEST) failed to load: {e}")
+            care_rows = []
+    
+        # Normalize the title as your production flow does (Tay-targeted title cleaning)
+        title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
+    
+        # For logging only (watch/warning/advisory/statement)
+        type_label = classify_alert_kind(title_raw)
+    
+        # This is the sheet matching key (wind, winter storm, rainfall, any, etc.)
+        hazard_bucket = _hazard_bucket_key_for_sheet(title_raw)
+    
+        # Severity emoji must reflect the EC colour already present in the title
+        sev = severity_emoji(title_raw)
+    
+        care = ""
+        if care_rows:
+            try:
+                care = pick_care_statement(care_rows, sev, hazard_bucket, platform="FB")
+                print(f"CareStatements(TEST): match ({sev} / {hazard_bucket} / FB) [kind={type_label}] => {'yes' if bool(care) else 'no'}")
+                if care:
+                    print("CareStatements(TEST): chosen text:", (care[:120] + "…") if len(care) > 120 else care)
+            except Exception as e:
+                print(f"⚠️ CareStatements(TEST) match failed: {e}")
+                care = ""
+    
+        # Build platform texts using the SAME builders as production.
+        # - Facebook: should include care when available
+        # - X: may include care only if it fits
+        x_text = build_x_post_text(fake_entry, more_url=more_url, care=care)
+        fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
+    
+        # Extra safety: if care exists but didn't land in the FB text, force-append it.
+        # (This should rarely trigger once the formatting logic is consistent.)
+        if care and (care.strip() not in fb_text):
+            fb_text = fb_text.replace(
+                "\n\nEnvironment Canada\n",
+                f"\n\n{care.strip()}\n\nEnvironment Canada\n",
+                1,
             )
-            kind_for_buttons = classify_alert_kind(fake_entry["title"])
-
-
+            print("CareStatements(TEST): force-appended care (was suppressed or missing).")
+    
+        kind_for_buttons = classify_alert_kind(fake_entry["title"])
+    
+        preview_text = (
+            f"🧪 TEST MODE: Sample alert (NO POST)\n\n"
+            f"----- X (NO POST) -----\n{x_text}\n\n"
+            f"----- Facebook (NO POST) -----\n{fb_text}\n\n"
+            f"RUN_MODE: {RUN_MODE}\n"
+            f"More:\n{more_url}\n\n"
+            f"TOKEN: {token}"
+        )
+    
+        # Send (or re-send) the preview + buttons
         ensure_preview_sent(
             st,
             save_state,
@@ -1940,12 +1986,14 @@ def main() -> None:
             kind=kind_for_buttons,
             image_urls=test_images,
         )
-
+    
+        # Handle decision flow
         ingest_telegram_actions(st, save_state)
         d = decision_for(st, token)
         if d not in ("approved", "denied"):
             d = wait_for_decision_safe(st, token)
-
+    
+        # Telegram confirmation messages (persistent acknowledgement)
         if d == "approved":
             try:
                 tg_send_message("✅ Test approved — confirmed: NO POST mode blocked all platform posting.")
@@ -1961,10 +2009,11 @@ def main() -> None:
                 tg_send_message("⏳ Test still pending — nothing posted this run.")
             except Exception:
                 pass
-
+    
         tg_send_test_success("Telegram preview + buttons path completed (NO POST mode).")
         return
 
+    
     # -------------------------------------------------------------------------
     # LIVE MODE: Optional platform test (existing behaviour preserved)
     # -------------------------------------------------------------------------
@@ -2145,7 +2194,7 @@ def main() -> None:
             severity=sev,
         )
 
-        # X stays clean: do NOT pass FB care
+        # X: include care only if it fits (builder enforces length rules)
         x_text = build_x_post_text(entry, more_url=more_url, care=care)
         fb_text = build_facebook_post_text(entry, care=care, more_url=more_url)
 
