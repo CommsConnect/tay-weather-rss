@@ -654,7 +654,20 @@ def load_care_statements_rows() -> List[dict]:
 #   enabled | hazard | severity | platform | weight | variant text
 # -----------------------------
 def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, platform: str = "FB") -> str:
-    """Return a single care statement text (or "")."""
+    """Return a single care statement text (or "").
+
+    IMPORTANT (matches your sheet schema):
+      - enabled | hazard | severity | platform | weight | variant text
+      - We treat the sheet's **hazard** column as the primary matching bucket.
+        In code, we pass that value via the parameter name `alert_type` to avoid a
+        widespread refactor. Think of `alert_type` here as: hazard_bucket_key.
+
+    Selection behaviour:
+      - Finds the MOST SPECIFIC matching bucket first (colour + hazard + platform).
+      - If multiple rows match in the best bucket, choose **weighted random** using
+        the sheet's 'weight' column (default weight = 1).
+      - If a bucket has no candidates, falls back to less specific buckets.
+    """
 
     def _get_first(r: dict, keys: List[str]) -> str:
         for k in keys:
@@ -692,22 +705,27 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, pla
             return "x"
         return p
 
-    want_type = (alert_type or "").strip().lower()
+    def norm_hazard_bucket(s: str) -> str:
+        # NOTE: sheet uses 'hazard' column (often 'any') as the bucket.
+        s = (s or "").strip().lower()
+        if not s:
+            return ""
+        return s
+
+    want_bucket = norm_hazard_bucket(alert_type)  # <- hazard bucket key
     want_colour = norm_colour((colour or "").strip())
     want_platform = norm_platform(platform)
 
     def row_colour(r: dict) -> str:
         return norm_colour(_get_first(r, ["colour", "color", "severity", "emoji"]))
 
-    def row_type(r: dict) -> str:
-        # Your sheet uses "hazard" (often "any") to mean bucket/type matching
-        return _get_first(r, ["type", "alert_type", "kind", "bucket", "hazard"]).strip().lower()
+    def row_bucket(r: dict) -> str:
+        return norm_hazard_bucket(_get_first(r, ["type", "alert_type", "kind", "bucket", "hazard"]))
 
     def row_platform(r: dict) -> str:
         return norm_platform(_get_first(r, ["platform", "channel"]))
 
     def row_text(r: dict) -> str:
-        # Your sheet uses "variant text"
         return _get_first(
             r,
             [
@@ -724,23 +742,31 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, pla
             ],
         )
 
-    def matches(r: dict, c_req: str, t_req: str, p_req: str) -> bool:
+    def row_weight(r: dict) -> int:
+        raw = _get_first(r, ["weight", "w", "priority"])
+        try:
+            w = int(float(str(raw))) if str(raw).strip() else 1
+            return max(1, w)
+        except Exception:
+            return 1
+
+    def matches(r: dict, c_req: str, b_req: str, p_req: str) -> bool:
         rc = row_colour(r)
-        rt = row_type(r)
+        rb = row_bucket(r)
         rp = row_platform(r)
 
         # colour filter
         if c_req and rc != c_req:
             return False
 
-        # type/hazard filter:
-        # treat blank/"any" in row as wildcard
-        if t_req:
-            if rt and rt not in ("any", "*") and rt != t_req:
+        # hazard bucket filter:
+        # treat blank/'any' in row as wildcard
+        if b_req:
+            if rb and rb not in ("any", "*") and rb != b_req:
                 return False
 
         # platform filter:
-        # treat blank/"any" in row as wildcard
+        # treat blank/'any' in row as wildcard
         if p_req:
             if rp and rp != p_req:
                 return False
@@ -749,24 +775,42 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, pla
 
     # Priority buckets (most specific -> least specific)
     buckets = [
-        (want_colour, want_type, want_platform),
-        ("", want_type, want_platform),
+        (want_colour, want_bucket, want_platform),
+        ("", want_bucket, want_platform),
         (want_colour, "", want_platform),
         ("", "", want_platform),
-        (want_colour, want_type, ""),  # allow platform-wildcard rows
-        ("", want_type, ""),
+        (want_colour, want_bucket, ""),  # allow platform-wildcard rows
+        ("", want_bucket, ""),
         (want_colour, "", ""),
         ("", "", ""),
     ]
 
-    for bc, bt, bp in buckets:
+    # Attempt in order: first bucket with at least one candidate wins.
+    for bc, bb, bp in buckets:
+        candidates: List[str] = []
+        weights: List[int] = []
+
         for r in (care_rows or []):
             if not enabled(r):
                 continue
-            if matches(r, bc, bt, bp):
-                txt = row_text(r).strip()
-                if txt:
-                    return txt
+            if not matches(r, bc, bb, bp):
+                continue
+
+            txt = row_text(r).strip()
+            if not txt:
+                continue
+
+            candidates.append(txt)
+            weights.append(row_weight(r))
+
+        if candidates:
+            # Weighted random choice for variety while still respecting your sheet priorities.
+            try:
+                return random.choices(candidates, weights=weights, k=1)[0].strip()
+            except Exception:
+                # Defensive fallback (should be rare)
+                return candidates[0].strip()
+
     return ""
 
 
@@ -1469,30 +1513,96 @@ def strip_tay_area_paren(s: str) -> str:
     return s.strip()
 
 def _pretty_title_for_social(title: str) -> str:
-    """
-    Converts EC banner title like:
-      "Yellow Warning - Snowfall"
-    into:
-      "Snowfall warning in Tay Township"
+    """Build the first-line headline in your required format (minus the emoji).
+
+    Environment Canada banner titles are commonly shaped like:
+      - "Yellow Watch - Winter Storm"
+      - "Orange Warning - Blizzard"
+      - "Special Weather Statement"
+
+    We convert that into:
+      - "WINTER STORM watch in Tay Township"
+      - "BLIZZARD warning in Tay Township"
+      - "SPECIAL WEATHER statement in Tay Township"   (best-effort)
+
+    NOTE:
+      - We do NOT decide the colour here (emoji comes from severity_emoji()).
+      - We only format the *hazard + product* part and enforce casing/wording.
     """
     t = (title or "").strip()
-
-    m = re.match(r"^(yellow|orange|red)\s+(warning|watch|advisory)\s*-\s*(.+)$", t, flags=re.IGNORECASE)
-    if m:
-        alert_type = m.group(2).lower().strip()
-        hazard = m.group(3).strip()
-        hazard = hazard[:1].upper() + hazard[1:] if hazard else hazard
-        return f"{hazard} {alert_type} in Tay Township"
-
+    t = strip_tay_area_paren(atom_title_for_tay(t))
     t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
+
+    # Pattern 1: "Yellow Watch - Winter Storm"
+    m = re.match(
+        r"^(yellow|orange|red)\s+(warning|watch|advisory|statement)\s*[-–—]\s*(.+)$",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        product = m.group(2).lower().strip()
+        hazard = (m.group(3) or "").strip().upper()
+        return f"{hazard} {product} in Tay Township"
+
+    # Pattern 2: "Winter Storm Watch" / "Wind Warning" etc.
+    m2 = re.match(r"^(.+?)\s+(warning|watch|advisory|statement)$", t, flags=re.IGNORECASE)
+    if m2:
+        hazard = (m2.group(1) or "").strip().upper()
+        product = (m2.group(2) or "").strip().lower()
+        return f"{hazard} {product} in Tay Township"
+
+    # Pattern 3: "Special Weather Statement"
+    if re.search(r"special\s+weather\s+statement", t, flags=re.IGNORECASE):
+        return "SPECIAL WEATHER statement in Tay Township"
+
+    # Fallback: keep whatever EC provided, but still append your location phrase.
     return f"{t} in Tay Township"
 
 
-def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
+def _hazard_bucket_key_for_sheet(title: str) -> str:
+    """Extract a stable, lowercase 'hazard bucket' key for CareStatements matching.
+
+    Your CareStatements sheet uses the 'hazard' column as the bucket (often 'any').
+    We derive a best-effort hazard key from the EC banner title.
+
+    Examples:
+      - "Yellow Watch - Winter Storm" -> "winter storm"
+      - "Wind Warning" -> "wind"
+      - "Special Weather Statement" -> "special weather"
     """
-    X post builder with character limit handling.
-    NOTE: In this bot, X should be clean/short and should NOT include FB care statements.
-          We keep the 'care' param for compatibility, but main() passes care="".
+    t = (title or "").strip()
+    t = strip_tay_area_paren(atom_title_for_tay(t))
+    t = re.sub(r"\s*\(.*?\)\s*$", "", t).strip()
+
+    m = re.match(
+        r"^(yellow|orange|red)\s+(warning|watch|advisory|statement)\s*[-–—]\s*(.+)$",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return (m.group(3) or "").strip().lower()
+
+    m2 = re.match(r"^(.+?)\s+(warning|watch|advisory|statement)$", t, flags=re.IGNORECASE)
+    if m2:
+        return (m2.group(1) or "").strip().lower()
+
+    if re.search(r"special\s+weather\s+statement", t, flags=re.IGNORECASE):
+        return "special weather"
+
+    # As a last resort, return the whole title. Better to match 'any' than fail hard.
+    return t.lower()
+def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", custom_x: str = "") -> str:
+    """X post builder with character limit handling (280 chars).
+
+    Requirements:
+      - Keep the same headline + closing block style as Facebook.
+      - Include Weather Canada details when possible.
+      - Include a care statement ONLY if it fits after required content.
+        (Less likely on X, but allowed.)
+
+    Order of optional content:
+      1) Custom text (Telegram ✏️ Custom) if it fits
+      2) Care statement if it fits (and is present)
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
@@ -1506,47 +1616,74 @@ def build_x_post_text(entry: Dict[str, Any], more_url: str, care: str = "", cust
     except Exception as e:
         print(f"⚠️ EC details parse failed (X): {e}")
 
-    def try_append_custom(base_text: str) -> str:
-        if custom_x.strip():
-            cand = base_text + "\n\n" + custom_x.strip()
-            if len(cand) <= 280:
-                return cand
-        return base_text
+    def _try_append_optional(base_text: str, *, allow_care: bool) -> str:
+        """Append custom and care text if they fit."""
+        out = base_text
 
-    # --- VERSION 1: MAX (2 details lines) ---
+        # 1) Custom (user-supplied) text first
+        if custom_x.strip():
+            cand = out + "\n\n" + custom_x.strip()
+            if len(cand) <= 280:
+                out = cand
+
+        # 2) Care statement only if allowed for this layout AND it fits
+        if allow_care and care.strip():
+            cand = out + "\n\n" + care.strip()
+            if len(cand) <= 280:
+                out = cand
+
+        return out
+
+    # -------------------------------------------------------------------------
+    # VERSION 1: MAX (2 details lines)
+    # - We generally do NOT attempt to add care here (rarely fits).
+    # -------------------------------------------------------------------------
     parts_max = [title_line, "", *details_lines[:2], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_max = "\n".join(parts_max).strip()
     if len(text_max) <= 280:
-        return try_append_custom(text_max)
+        return _try_append_optional(text_max, allow_care=False)
 
-    # --- VERSION 2: MEDIUM (1 details line) ---
+    # -------------------------------------------------------------------------
+    # VERSION 2: MEDIUM (1 details line)
+    # - Allow care if space remains.
+    # -------------------------------------------------------------------------
     if details_lines:
         parts_med = [title_line, "", details_lines[0], "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
         text_med = "\n".join(parts_med).strip()
         if len(text_med) <= 280:
-            return try_append_custom(text_med)
+            return _try_append_optional(text_med, allow_care=True)
 
-    # --- VERSION 3: MINIMAL (No details) ---
+    # -------------------------------------------------------------------------
+    # VERSION 3: MINIMAL (No details)
+    # - Allow care if space remains.
+    # -------------------------------------------------------------------------
     parts_min = [title_line, "", "Environment Canada", f"More: {more_url}", "#TayTownship #ONStorm"]
     text_min = "\n".join(parts_min).strip()
     if len(text_min) <= 280:
-        return try_append_custom(text_min)
+        return _try_append_optional(text_min, allow_care=True)
 
     return text_min[:277].rstrip() + "..."
 
 
 def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, custom_fb: str = "") -> str:
-    """
-    Facebook SHOULD include:
-      - Details lines (What/When)
-      - Recommended action (when present on EC page)
-      - OR Care statement (from Google Sheets) IF no recommended action is found
+    """Facebook post builder (your fixed format).
+
+    Includes:
+      - Headline (emoji + HAZARD + product + "in Tay Township")
+      - Up to 3 EC detail lines (What/When/etc.)
+      - Recommended action (if present on EC page)
+      - Care statement (from your Google Sheet)  ✅ ALWAYS appended when available
+      - Custom text (Telegram ✏️ Custom), if provided
+
+    Closing block is always:
+      Environment Canada
+      More: <short URL>
+      #TayTownship #ONStorm   (hashtags may evolve later)
     """
     title_raw = strip_tay_area_paren(atom_title_for_tay((entry.get("title") or "").strip()))
     official = (entry.get("link") or "").strip()
 
     sev = "🟢" if is_alert_ended(title_raw, entry.get("summary") or "") else severity_emoji(title_raw)
-
     title_line = f"{sev} {_pretty_title_for_social(title_raw)}" if sev else _pretty_title_for_social(title_raw)
 
     details_lines: List[str] = []
@@ -1566,12 +1703,23 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("")
     parts.extend(details_lines[:3])
 
+    # -------------------------------------------------------------------------
+    # Recommended action (from EC) AND care statement (from your sheet)
+    #
+    # Your requirement: Facebook posts include the care statement selected by:
+    #   (severity colour + hazard bucket + weight)
+    #
+    # Recommended action is still valuable official guidance, so:
+    #   - include it when present
+    #   - still append the care statement afterward (when available)
+    # -------------------------------------------------------------------------
     if recommended_action:
         parts.append("")
         parts.append("Recommended action:")
         ra = recommended_action.strip().rstrip(".")
         parts.append(f"• {ra}.")
-    elif care:
+
+    if care:
         parts.append("")
         parts.append(care.strip())
 
@@ -1585,8 +1733,10 @@ def build_facebook_post_text(entry: Dict[str, Any], care: str, more_url: str, cu
     parts.append("#TayTownship #ONStorm")
 
     print(
-        f"FB build: action={'yes' if bool(recommended_action) else 'no'}, "
-        f"care_applied={'yes' if (not recommended_action and care) else 'no'}"
+        "FB build: "
+        f"recommended_action={'yes' if bool(recommended_action) else 'no'}, "
+        f"care_included={'yes' if bool(care) else 'no'}, "
+        f"custom_included={'yes' if bool(custom_fb.strip()) else 'no'}"
     )
 
     return "\n".join(parts).strip()
@@ -1741,13 +1891,14 @@ def main() -> None:
                 care_rows = []
 
             title_raw = atom_title_for_tay((fake_entry.get("title") or "").strip())
-            type_label = classify_alert_kind(title_raw)
+            type_label = classify_alert_kind(title_raw)  # warning/watch/advisory/statement (for logs)
+            hazard_bucket = _hazard_bucket_key_for_sheet(title_raw)
             sev = severity_emoji(title_raw)
 
             care = ""
             if care_rows:
                 try:
-                    care = pick_care_statement(care_rows, sev, type_label)
+                    care = pick_care_statement(care_rows, sev, hazard_bucket, platform="FB")
                     print(f"CareStatements(TEST): match ({sev} / {type_label}) => {'yes' if bool(care) else 'no'}")
                     if care:
                         print("CareStatements(TEST): chosen text:", (care[:120] + "…") if len(care) > 120 else care)
@@ -1756,7 +1907,7 @@ def main() -> None:
                     care = ""
 
             # X stays clean in test previews
-            x_text = build_x_post_text(fake_entry, more_url=more_url, care="")
+            x_text = build_x_post_text(fake_entry, more_url=more_url, care=care)
 
             # FB gets care in test previews (and can't be overridden by Recommended action now)
             fb_text = build_facebook_post_text(fake_entry, care=care, more_url=more_url)
@@ -1966,7 +2117,8 @@ def main() -> None:
             continue
 
         title_raw = atom_title_for_tay((entry.get("title") or "Weather alert").strip())
-        type_label = classify_alert_kind(title_raw)
+        type_label = classify_alert_kind(title_raw)  # warning/watch/advisory/statement (for logs)
+        hazard_bucket = _hazard_bucket_key_for_sheet(title_raw)
         sev = severity_emoji(title_raw)
 
         care = ""
@@ -1974,12 +2126,12 @@ def main() -> None:
             try:
                 care_severity = "🟢" if ended else sev
                 # IMPORTANT: care statements are FB-only in this bot
-                care = pick_care_statement(care_rows, care_severity, type_label, platform="FB")
+                care = pick_care_statement(care_rows, care_severity, hazard_bucket, platform="FB")
 
                 if care:
-                    print(f"CareStatements: matched ({care_severity} / {type_label} / FB)")
+                    print(f"CareStatements: matched ({care_severity} / {hazard_bucket} / FB) [kind={type_label}]")
                 else:
-                    print(f"CareStatements: no match for ({care_severity} / {type_label} / FB)")
+                    print(f"CareStatements: no match for ({care_severity} / {hazard_bucket} / FB) [kind={type_label}]")
                 print("CareStatements: chosen text:", (care[:120] + "…") if care and len(care) > 120 else care)
             except Exception as e:
                 print(f"⚠️ Care statement match failed: {e}")
@@ -1994,7 +2146,7 @@ def main() -> None:
         )
 
         # X stays clean: do NOT pass FB care
-        x_text = build_x_post_text(entry, more_url=more_url, care="")
+        x_text = build_x_post_text(entry, more_url=more_url, care=care)
         fb_text = build_facebook_post_text(entry, care=care, more_url=more_url)
 
         h = text_hash(x_text)
@@ -2041,7 +2193,7 @@ def main() -> None:
                         care2 = pick_remixed_care_text(
                             care_rows=care_rows,
                             colour=care_colour_for_sheet,
-                            alert_type=type_label,
+                            alert_type=hazard_bucket,
                             current_care_text=care,
                             remix_count=current_remix,
                             platform="FB",
@@ -2050,7 +2202,7 @@ def main() -> None:
                         print(f"⚠️ Care remix failed: {e}")
                         care2 = care
 
-                x_text2 = build_x_post_text(entry, more_url=more_url, care="", custom_x=x_extra)
+                x_text2 = build_x_post_text(entry, more_url=more_url, care=care2, custom_x=x_extra)
                 fb_text2 = build_facebook_post_text(entry, care=care2, more_url=more_url, custom_fb=fb_extra)
 
                 care = care2
