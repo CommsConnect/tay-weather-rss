@@ -689,12 +689,6 @@ def load_care_statements_rows() -> List[dict]:
                 return str(r.get(k, "")).strip()
         return ""
 
-    def enabled(r: dict) -> bool:
-        raw = _get_first(r, ["enabled", "active", "use"])
-        if raw == "":
-            return True
-        return raw.lower() in ("true", "yes", "1", "y", "on")
-
     def norm_colour(c: str) -> str:
         c = (c or "").strip().lower()
         if c in ("🔴", "red"):
@@ -729,6 +723,9 @@ def load_care_statements_rows() -> List[dict]:
     want_bucket = norm_hazard_bucket(alert_type)  # <- hazard bucket key
     want_colour = norm_colour((colour or "").strip())
     want_platform = norm_platform(platform)
+
+    enabled_count = sum(1 for r in (care_rows or []) if enabled(r))
+    print(f"CareStatements(DEBUG): rows={len(care_rows or [])} enabled={enabled_count} want=({want_colour} / {want_type} / {want_platform})")
 
     def row_colour(r: dict) -> str:
         return norm_colour(_get_first(r, ["colour", "color", "severity", "emoji"]))
@@ -787,9 +784,6 @@ def load_care_statements_rows() -> List[dict]:
 
         return True
 
-        enabled_count = sum(1 for r in (care_rows or []) if enabled(r))
-        print(f"CareStatements(DEBUG): rows={len(care_rows or [])} enabled={enabled_count} want=({want_colour} / {want_type} / {want_platform})")
-
     # Priority buckets (most specific -> least specific)
     buckets = [
         (want_colour, want_bucket, want_platform),
@@ -801,7 +795,7 @@ def load_care_statements_rows() -> List[dict]:
         (want_colour, "", ""),
         ("", "", ""),
     ]
-
+    
     # Attempt in order: first bucket with at least one candidate wins.
     for bc, bb, bp in buckets:
         candidates: List[str] = []
