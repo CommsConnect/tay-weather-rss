@@ -653,21 +653,35 @@ def load_care_statements_rows() -> List[dict]:
 # Supports your sheet schema:
 #   enabled | hazard | severity | platform | weight | variant text
 # -----------------------------
-def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, platform: str = "FB") -> str:
-    """Return a single care statement text (or "").
+    def enabled(r: dict) -> bool:
+        """
+        Treat enabled as TRUE unless explicitly false.
 
-    IMPORTANT (matches your sheet schema):
-      - enabled | hazard | severity | platform | weight | variant text
-      - We treat the sheet's **hazard** column as the primary matching bucket.
-        In code, we pass that value via the parameter name `alert_type` to avoid a
-        widespread refactor. Think of `alert_type` here as: hazard_bucket_key.
+        Why:
+        - Google Sheets can return TRUE/FALSE strings for checkboxes
+        - But numeric sheets often return 1 / 0 or even 1.0 / 0.0
+        - The previous logic mistakenly treated '1.0' as disabled
+        """
+        raw = _get_first(r, ["enabled", "active", "use"])
 
-    Selection behaviour:
-      - Finds the MOST SPECIFIC matching bucket first (colour + hazard + platform).
-      - If multiple rows match in the best bucket, choose **weighted random** using
-        the sheet's 'weight' column (default weight = 1).
-      - If a bucket has no candidates, falls back to less specific buckets.
-    """
+        # If the column is missing/blank, default to enabled
+        if raw is None:
+            return True
+        s = str(raw).strip().lower()
+        if s == "":
+            return True
+
+        # Explicit false values
+        if s in ("false", "no", "0", "0.0", "n", "off"):
+            return False
+
+        # Explicit true values (including numeric floats-as-strings)
+        if s in ("true", "yes", "1", "1.0", "y", "on"):
+            return True
+
+        # If it's some other weird value, be conservative: treat as enabled
+        return True
+
 
     def _get_first(r: dict, keys: List[str]) -> str:
         for k in keys:
@@ -772,6 +786,9 @@ def pick_care_statement(care_rows: List[dict], colour: str, alert_type: str, pla
                 return False
 
         return True
+
+        enabled_count = sum(1 for r in (care_rows or []) if enabled(r))
+        print(f"CareStatements(DEBUG): rows={len(care_rows or [])} enabled={enabled_count} want=({want_colour} / {want_type} / {want_platform})")
 
     # Priority buckets (most specific -> least specific)
     buckets = [
