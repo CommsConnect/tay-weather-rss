@@ -6,7 +6,13 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW WATCH - WINTER STORM (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260217040240</guid><pubDate>Tue, 17 Feb 2026 04:02:40 +0000</pubDate><description>YELLOW WATCH - WINTER STORM (Tay Township area)
+<item><title>YELLOW WATCH - WINTER STORM (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260217103107</guid><pubDate>Tue, 17 Feb 2026 10:31:07 +0000</pubDate><description>YELLOW WATCH - WINTER STORM (Tay Township area)
+Issued: 5:31 AM EST Tuesday 17 February 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260217113733</guid><pubDate>Tue, 17 Feb 2026 11:37:33 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
+Issued: 6:37 AM EST Tuesday 17 February 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WATCH - WINTER STORM (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260217040240</guid><pubDate>Tue, 17 Feb 2026 04:02:40 +0000</pubDate><description>YELLOW WATCH - WINTER STORM (Tay Township area)
 Issued: 11:02 PM EST Monday 16 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WATCH - WINTER STORM (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260216200157</guid><pubDate>Mon, 16 Feb 2026 20:01:57 +0000</pubDate><description>YELLOW WATCH - WINTER STORM (Tay Township area)
@@ -74,12 +80,6 @@ Issued: 9:35 PM EST Thursday 29 January 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260129233949</guid><pubDate>Thu, 29 Jan 2026 23:39:49 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
 Issued: 6:39 PM EST Thursday 29 January 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260129160019</guid><pubDate>Thu, 29 Jan 2026 16:00:19 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
-Issued: 11:00 AM EST Thursday 29 January 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - SNOW SQUALL ENDED (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260129052628</guid><pubDate>Thu, 29 Jan 2026 05:26:28 +0000</pubDate><description>YELLOW WARNING - SNOW SQUALL ENDED (Tay Township area)
-Issued: 12:26 AM EST Thursday 29 January 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
