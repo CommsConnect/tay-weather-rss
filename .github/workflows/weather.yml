@@ -87,6 +87,16 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
+      - name: Debug service account identity
+        run: |
+          python - <<'PY'
+          import json, os
+          p = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+          data = json.load(open(p, "r", encoding="utf-8"))
+          print("SERVICE_ACCOUNT_EMAIL=", data.get("client_email"))
+          print("PROJECT_ID=", data.get("project_id"))
+          PY
+
       - name: Debug Google creds file exists (no secrets printed)
         run: |
           echo "GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_APPLICATION_CREDENTIALS"
@@ -160,21 +170,43 @@ jobs:
             raise SystemExit("❌ GOOGLE_DRIVE_FOLDER_ID secret is empty/missing")
 
           svc = build("drive", "v3")
+
+          # 1) Prove the folder ID resolves and show whether it's on a Shared Drive
+          meta = svc.files().get(
+              fileId=folder_id,
+              fields="id,name,mimeType,driveId,parents",
+              supportsAllDrives=True,
+          ).execute()
+
+          print("✅ Folder resolves:")
+          print(f"- name={meta.get('name')}")
+          print(f"- mimeType={meta.get('mimeType')}")
+          print(f"- driveId={meta.get('driveId')}")
+
+          # 2) List 1 file inside it
           q = f"'{folder_id}' in parents and trashed=false"
-          res = svc.files().list(
+
+          # If it's on a Shared Drive, use corpora=drive + driveId for more reliable listing
+          drive_id = meta.get("driveId")
+          kwargs = dict(
               q=q,
               fields="files(id,name,mimeType),nextPageToken",
               pageSize=1,
               supportsAllDrives=True,
               includeItemsFromAllDrives=True,
-          ).execute()
+          )
+          if drive_id:
+            kwargs.update(dict(corpora="drive", driveId=drive_id))
 
+          res = svc.files().list(**kwargs).execute()
           files = res.get("files", [])
+
           if not files:
-            print("⚠️  Drive auth OK, but folder appears empty OR SA has no access to that folder.")
+            print("⚠️  Folder is reachable, but no files returned.")
+            print("    Causes: folder truly empty OR service account lacks access to contents (shared drive membership/share).")
           else:
             f = files[0]
-            print("✅ Drive auth OK. Example file:")
+            print("✅ Example file:")
             print(f"- {f.get('name')} ({f.get('mimeType')}) id={f.get('id')}")
           PY
 
