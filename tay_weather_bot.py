@@ -320,6 +320,11 @@ def load_state() -> dict:
 
         # for remix/custom refresh bookkeeping
         "telegram_last_remix_seen": {},
+
+        # Simple EC change tracking
+        "last_ec_updated_iso": "",
+        "last_had_alert": False,
+
     }
 
     if not os.path.exists(STATE_PATH):
@@ -2247,6 +2252,97 @@ def main() -> None:
         print("Exiting cleanly; will retry on next scheduled run.")
         return
 
+    # -------------------------------------------------------------------------
+    # SIMPLE CHANGE TRACKING (EC updates + going green)
+    # -------------------------------------------------------------------------
+    def _is_general_bulletin(e: dict) -> bool:
+        t = normalize_alert_title(atom_title_for_tay((e.get("title") or "").strip())).lower()
+        s = ((e.get("summary") or "")).lower()
+        markers = ("no alerts in effect", "no watches or warnings in effect")
+        return any(m in t for m in markers) or any(m in s for m in markers)
+
+    actionable = [e for e in feed_entries if not _is_general_bulletin(e)]
+    newest = actionable[0] if actionable else None
+
+    # --- If no alerts, post GREEN once then exit ---
+    if not newest:
+        if state.get("last_had_alert"):
+            print("All clear: going green (posting once).")
+
+            x_text = "\n".join([
+                "🟢 ALL CLEAR in Tay Township",
+                "",
+                "No Environment Canada alerts are currently in effect for the Tay Township area.",
+                "",
+                "Environment Canada",
+                f"More: {more_url}",
+                "#TayTownship #ONStorm",
+            ]).strip()
+
+            fb_text = x_text
+
+            image_refs = choose_images_for_alert(
+                drive_svc=drive_svc,
+                drive_folder_id=drive_folder_id,
+                alert_kind="other",
+                alert_type_label="All Clear",
+                severity="🟢",
+            )
+
+            # Optional: respect Telegram gate like everything else
+            if TELEGRAM_ENABLE_GATE:
+                token = hashlib.sha1("all-clear".encode("utf-8")).hexdigest()[:10]
+                ingest_telegram_actions(state, save_state)
+                maybe_send_reminders(state, save_state)
+
+                preview_text = (
+                    "🟢 ALL CLEAR in Tay Township\n\n"
+                    f"----- X (will post) -----\n{x_text}\n\n"
+                    f"----- Facebook (will post) -----\n{fb_text}\n\n"
+                    f"More:\n{more_url}\n\n"
+                    f"TOKEN: {token}"
+                )
+
+                ensure_preview_sent(state, save_state, token, preview_text, kind="other", image_urls=image_refs)
+
+                d = decision_for(state, token)
+                if d not in ("approved", "denied"):
+                    d = wait_for_decision_safe(state, token)
+                if d != "approved":
+                    print("All clear: not approved. Skipping.")
+                    return
+
+            if EFFECTIVE_ENABLE_X_POSTING:
+                safe_post_to_x(x_text, image_refs=image_refs)
+
+            if EFFECTIVE_ENABLE_FB_POSTING:
+                fb_images = materialize_images_for_facebook(image_refs)
+                try:
+                    safe_post_to_facebook(state, caption=fb_text, image_urls=fb_images)
+                finally:
+                    cleanup_tmp_media_files(fb_images)
+
+        # Mark state as green/clear and exit
+        state["last_had_alert"] = False
+        state["last_ec_updated_iso"] = ""
+        save_state(state)
+        return
+
+    # --- There IS an alert: only proceed if EC updated timestamp changed ---
+    newest_updated_iso = (newest.get("updated_dt") or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc).isoformat()
+
+    if state.get("last_ec_updated_iso") == newest_updated_iso:
+        print("No Environment Canada update (same updated timestamp). Skipping.")
+        state["last_had_alert"] = True
+        save_state(state)
+        return
+
+    # It changed, allow the existing loop to run normally
+    state["last_ec_updated_iso"] = newest_updated_iso
+    state["last_had_alert"] = True
+    save_state(state)
+
+ 
     def entry_guid(entry: dict) -> str:
         return (entry.get("id") or entry.get("link") or "").strip()
 
