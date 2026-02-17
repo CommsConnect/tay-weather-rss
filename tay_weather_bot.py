@@ -15,7 +15,7 @@
 #           (so a "wind warning" won’t show winter-road cameras)
 #
 # CARE STATEMENTS (Facebook only)
-#   - X should be clean/short and NOT include the care statement.
+#   - X should be clean/short and NOT include the care statement unless it fits within the character limit.
 #   - Facebook SHOULD append a care statement pulled from the Google Sheet
 #     tab: "CareStatements"
 #
@@ -324,8 +324,8 @@ def load_state() -> dict:
         # Simple EC change tracking
         "last_ec_updated_iso": "",
         "last_had_alert": False,
-
     }
+
 
     if not os.path.exists(STATE_PATH):
         return default
@@ -667,8 +667,7 @@ def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
     drive_svc = build("drive", "v3", credentials=creds, cache_discovery=False)
     return sheets_svc, drive_svc, sheet_id, drive_folder_id
 
-
-def load_care_statements_rows() -> list[dict]:
+def load_care_statements_rows(sheets_svc: Optional[Any], default_sheet_id: str = "") -> list[dict]:
     """
     Loads CareStatements from Google Sheets.
 
@@ -678,20 +677,28 @@ def load_care_statements_rows() -> list[dict]:
     Compatible with:
       TRUE / true / 1
       FB / Facebook
-      emoji severities 🟡 🟠 🔴
+      emoji severities 🟡 🟠 🔴 🟢
     """
-
-    sheet_id = os.getenv("CARE_SHEET_ID", "").strip()
     tab = os.getenv("CARE_SHEET_TAB", "CareStatements").strip()
 
+    # Prefer the authenticated Sheets client + ID from _google_services()
+    sheet_id = (default_sheet_id or "").strip() or os.getenv("CARE_SHEET_ID", "").strip()
+
     if not sheet_id:
-        print("⚠️ CareStatements: CARE_SHEET_ID not set")
+        print("⚠️ CareStatements: sheet id not set (GOOGLE_SHEET_ID/CARE_SHEET_ID missing)")
         return []
 
+    if sheets_svc is None:
+        # Fallback: try ADC (only if your runner has it)
+        try:
+            sheets_svc = build("sheets", "v4")
+        except Exception as e:
+            print(f"⚠️ CareStatements: no Sheets service available: {e}")
+            return []
+
     try:
-        svc = build("sheets", "v4")
         rng = f"{tab}!A1:Z500"
-        res = svc.spreadsheets().values().get(
+        res = sheets_svc.spreadsheets().values().get(
             spreadsheetId=sheet_id,
             range=rng
         ).execute()
@@ -769,7 +776,6 @@ def load_care_statements_rows() -> list[dict]:
     except Exception as e:
         print(f"⚠️ CareStatements load failed: {e}")
         return []
-
 
 # -----------------------------
 # CareStatements selector
@@ -2048,7 +2054,7 @@ def main() -> None:
         # -----------------------------------------------------------------
         care_rows: List[dict] = []
         try:
-            care_rows = load_care_statements_rows()
+            care_rows = load_care_statements_rows(sheets_svc, sheet_id)
             print(f"CareStatements(TEST): loaded {len(care_rows)} rows")
             if care_rows:
                 print("CareStatements(TEST): sample keys:", sorted(care_rows[0].keys()))
@@ -2232,7 +2238,7 @@ def main() -> None:
     # Load CareStatements once per run
     care_rows: List[dict] = []
     try:
-        care_rows = load_care_statements_rows()
+        care_rows = load_care_statements_rows(sheets_svc, sheet_id)
         print(f"CareStatements: loaded {len(care_rows)} rows")
         if care_rows:
             print("CareStatements: sample keys:", sorted(care_rows[0].keys()))
@@ -2253,7 +2259,7 @@ def main() -> None:
         return
 
     # -------------------------------------------------------------------------
-    # SIMPLE CHANGE TRACKING (EC updates + going green)
+    # SIMPLE CHANGE TRACKING (EC updated timestamp + going green once)
     # -------------------------------------------------------------------------
     def _is_general_bulletin(e: dict) -> bool:
         t = normalize_alert_title(atom_title_for_tay((e.get("title") or "").strip())).lower()
@@ -2264,7 +2270,7 @@ def main() -> None:
     actionable = [e for e in feed_entries if not _is_general_bulletin(e)]
     newest = actionable[0] if actionable else None
 
-    # --- If no alerts, post GREEN once then exit ---
+    # --- If no alerts, post GREEN once (if we previously had alerts), then exit ---
     if not newest:
         if state.get("last_had_alert"):
             print("All clear: going green (posting once).")
@@ -2292,6 +2298,7 @@ def main() -> None:
             # Optional: respect Telegram gate like everything else
             if TELEGRAM_ENABLE_GATE:
                 token = hashlib.sha1("all-clear".encode("utf-8")).hexdigest()[:10]
+
                 ingest_telegram_actions(state, save_state)
                 maybe_send_reminders(state, save_state)
 
@@ -2341,7 +2348,6 @@ def main() -> None:
     state["last_ec_updated_iso"] = newest_updated_iso
     state["last_had_alert"] = True
     save_state(state)
-
  
     def entry_guid(entry: dict) -> str:
         return (entry.get("id") or entry.get("link") or "").strip()
