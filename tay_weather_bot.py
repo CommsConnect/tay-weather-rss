@@ -60,6 +60,41 @@ from telegram_gate import (
     tg_send_message,
 )
 
+# -----------------------------
+# Care Statements normalization helpers
+# -----------------------------
+def _truthy(v: object) -> bool:
+    s = ("" if v is None else str(v)).strip().lower()
+    return s in ("true", "t", "1", "yes", "y", "on")
+
+def _norm_platform(v: object) -> str:
+    s = ("" if v is None else str(v)).strip().upper()
+    # Your sheet uses "FB"
+    if s in ("FB", "FACEBOOK"):
+        return "FB"
+    if s in ("X", "TWITTER"):
+        return "X"
+    return s
+
+def _norm_severity(v: object) -> str:
+    # Keep emoji severity untouched, but normalize common text variants too
+    s = ("" if v is None else str(v)).strip()
+
+    # Emoji in your sheet
+    if s in ("🟡", "🟠", "🔴"):
+        return s
+
+    sl = s.lower()
+    if sl in ("yellow", "y", "advisory"):
+        return "🟡"
+    if sl in ("orange", "o", "watch", "warning"):
+        return "🟠"
+    if sl in ("red", "r", "emergency"):
+        return "🔴"
+
+    return s  # leave as-is if unknown
+
+
 # =============================================================================
 # Feature toggles (controlled by GitHub Actions env)
 # =============================================================================
@@ -628,25 +663,108 @@ def _google_services() -> Tuple[Optional[Any], Optional[Any], str, str]:
     return sheets_svc, drive_svc, sheet_id, drive_folder_id
 
 
-def load_care_statements_rows() -> List[dict]:
-    sheets_svc, _, sheet_id, _ = _google_services()
-    if not sheets_svc or not sheet_id:
+def load_care_statements_rows() -> list[dict]:
+    """
+    Loads CareStatements from Google Sheets.
+
+    Sheet schema expected:
+      enabled | hazard | severity | platform | weight | variant text
+
+    Compatible with:
+      TRUE / true / 1
+      FB / Facebook
+      emoji severities 🟡 🟠 🔴
+    """
+
+    sheet_id = os.getenv("CARE_SHEET_ID", "").strip()
+    tab = os.getenv("CARE_SHEET_TAB", "CareStatements").strip()
+
+    if not sheet_id:
+        print("⚠️ CareStatements: CARE_SHEET_ID not set")
         return []
 
-    rng = "CareStatements!A:Z"
-    resp = sheets_svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
-    values = resp.get("values", [])
-    if not values or len(values) < 2:
+    try:
+        svc = build("sheets", "v4")
+        rng = f"{tab}!A1:Z500"
+        res = svc.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range=rng
+        ).execute()
+
+        values = res.get("values", []) or []
+        if not values:
+            print("CareStatements: sheet empty")
+            return []
+
+        header = [h.strip().lower() for h in values[0]]
+
+        def col(name: str) -> int:
+            try:
+                return header.index(name)
+            except ValueError:
+                return -1
+
+        i_enabled = col("enabled")
+        i_hazard = col("hazard")
+        i_severity = col("severity")
+        i_platform = col("platform")
+        i_weight = col("weight")
+        i_text = col("variant text")
+
+        rows_out = []
+
+        for row in values[1:]:
+            def get(i: int) -> str:
+                if i < 0:
+                    return ""
+                return (row[i] if i < len(row) else "") or ""
+
+            # ---- enabled ----
+            enabled_raw = get(i_enabled).strip().lower()
+            if enabled_raw and enabled_raw not in ("true", "1", "yes", "y"):
+                continue
+
+            # ---- platform ----
+            platform_raw = get(i_platform).strip().upper()
+            if platform_raw not in ("FB", "FACEBOOK"):
+                continue
+
+            # ---- severity ----
+            severity_raw = get(i_severity).strip()
+            if severity_raw not in ("🟡", "🟠", "🔴", "🟢"):
+                continue  # ignore malformed rows
+
+            # ---- hazard ----
+            hazard_raw = get(i_hazard).strip().lower() or "any"
+
+            # ---- text ----
+            text_raw = get(i_text).strip()
+            if not text_raw:
+                continue
+
+            # ---- weight ----
+            weight_raw = get(i_weight).strip()
+            try:
+                weight = int(float(weight_raw)) if weight_raw else 1
+            except Exception:
+                weight = 1
+
+            rows_out.append({
+                "enabled": True,
+                "hazard": hazard_raw,
+                "severity": severity_raw,
+                "platform": "FB",
+                "weight": weight,
+                "variant text": text_raw,
+            })
+
+        print(f"CareStatements: loaded {len(rows_out)} usable rows")
+        return rows_out
+
+    except Exception as e:
+        print(f"⚠️ CareStatements load failed: {e}")
         return []
 
-    headers = [h.strip().lower() for h in values[0]]
-    rows: List[dict] = []
-    for v in values[1:]:
-        row = {}
-        for i, h in enumerate(headers):
-            row[h] = v[i].strip() if i < len(v) and isinstance(v[i], str) else (v[i] if i < len(v) else "")
-        rows.append(row)
-    return rows
 
 # -----------------------------
 # CareStatements selector
