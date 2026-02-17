@@ -124,6 +124,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug CareStatements sheet (raw)
+        env:
+          CARE_SHEET_ID: ${{ secrets.CARE_SHEET_ID || secrets.GOOGLE_SHEET_ID }}
+          CARE_SHEET_TAB: "CareStatements"
+        run: |
+          python - <<'PY'
+          import os
+          from googleapiclient.discovery import build
+
+          sheet_id = (os.getenv("CARE_SHEET_ID") or "").strip()
+          tab = (os.getenv("CARE_SHEET_TAB") or "CareStatements").strip()
+
+          if not sheet_id:
+            raise SystemExit("❌ CARE_SHEET_ID missing")
+
+          svc = build("sheets", "v4")
+          rng = f"{tab}!A1:Z200"
+          res = svc.spreadsheets().values().get(spreadsheetId=sheet_id, range=rng).execute()
+          values = res.get("values", [])
+
+          print("✅ Sheets read OK")
+          print("Rows returned (including header):", len(values))
+          if values:
+            print("Header:", values[0])
+            for i, row in enumerate(values[1:11], start=2):
+              print(f"Row {i}:", row)
+          PY
+          
+
       - name: Sanity check config (non-secret)
         run: |
           echo "RUN_MODE=${RUN_MODE}"
