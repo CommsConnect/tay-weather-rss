@@ -6,7 +6,13 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260218021543</guid><pubDate>Wed, 18 Feb 2026 02:15:43 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
+<item><title>YELLOW WARNING - SNOWFALL (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260218040029</guid><pubDate>Wed, 18 Feb 2026 04:00:29 +0000</pubDate><description>YELLOW WARNING - SNOWFALL (Tay Township area)
+Issued: 11:00 PM EST Tuesday 17 February 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260218040345</guid><pubDate>Wed, 18 Feb 2026 04:03:45 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
+Issued: 11:03 PM EST Tuesday 17 February 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260218021543</guid><pubDate>Wed, 18 Feb 2026 02:15:43 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
 Issued: 9:15 PM EST Tuesday 17 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260217232944</guid><pubDate>Tue, 17 Feb 2026 23:29:44 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
@@ -74,12 +80,6 @@ Issued: 4:21 AM EST Saturday 31 January 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260131012219</guid><pubDate>Sat, 31 Jan 2026 01:22:19 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
 Issued: 8:22 PM EST Friday 30 January 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260130214227</guid><pubDate>Fri, 30 Jan 2026 21:42:27 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
-Issued: 4:42 PM EST Friday 30 January 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - COLD (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260130154651</guid><pubDate>Fri, 30 Jan 2026 15:46:51 +0000</pubDate><description>YELLOW WARNING - COLD (Tay Township area)
-Issued: 10:46 AM EST Friday 30 January 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
