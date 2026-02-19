@@ -336,6 +336,16 @@
       "decision": "denied",
       "decided_at": "2026-02-18T22:47:38Z",
       "reason": "expired"
+    },
+    "8f8a77dcec": {
+      "decision": "denied",
+      "decided_at": "2026-02-19T12:04:41Z",
+      "reason": "expired"
+    },
+    "6ba3a2b894": {
+      "decision": "denied",
+      "decided_at": "2026-02-19T12:04:41Z",
+      "reason": "expired"
     }
   },
   "cooldowns": {
@@ -344,25 +354,17 @@
     "cbb4070219546f6b703d8892fa8ae9fc64ae793c": 1768139486,
     "ff0a63ffc349e53f3fb9c78829f24316ddbb29d5": 1771371778
   },
-  "fb_cooldown_until": "2026-02-18T00:42:37.949764Z",
-  "fb_last_posted_at": "2026-02-17T23:42:37.949764Z",
+  "fb_cooldown_until": "2026-02-19T13:05:03.031239Z",
+  "fb_last_posted_at": "2026-02-19T12:05:03.031239Z",
   "global_last_post_ts": 1771371778,
   "pending_approvals": {
-    "8f8a77dcec": {
-      "created_at": "2026-02-18T22:47:39Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - SNOWFALL ----- X (will post) -----\n\ud83d\udfe1 SNOWFALL warning in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Snow mixing with ice pellets at times. Icy and slippery conditions.\nContinuing through this evening.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 SNOWFALL warning in Tay Township\n\nSnowfall amounts of 10 to 15 cm. Snow mixing with ice pellets at times. Icy and slippery conditions.\nContinuing through this evening.\n\nSmall precautions now can prevent bigger problems later. Stay alert and take care.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 511,
+    "1a3683f3c4": {
+      "created_at": "2026-02-19T12:04:42Z",
+      "preview_text": "\ud83d\udfe2 ALL CLEAR in Tay Township\n\n----- X (will post) -----\n\ud83d\udfe2 ALL CLEAR in Tay Township\n\nNo Environment Canada alerts are currently in effect for the Tay Township area.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 ALL CLEAR in Tay Township\n\nNo Environment Canada alerts are currently in effect for the Tay Township area.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nMore:\nhttps://tayweather.short.gy/alert\n\nTOKEN: 1a3683f3c4",
+      "kind": "other",
+      "buttons_message_id": 544,
       "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-02-18T22:47:39Z"
-    },
-    "6ba3a2b894": {
-      "created_at": "2026-02-18T23:16:04Z",
-      "preview_text": "\ud83d\udfe2 YELLOW WARNING - SNOWFALL ENDED ----- X (will post) -----\n\ud83d\udfe2 SNOWFALL ENDED warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 SNOWFALL ENDED warning in Tay Township\n\nThe alert has ended as conditions improve. Thank you for looking out for one another during changing weather.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 514,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-02-18T23:16:04Z"
+      "last_preview_sent_at": "2026-02-19T12:04:42Z"
     }
   },
   "posted_guids": [
@@ -497,6 +499,6 @@
     "9e9b11f786": 1
   },
   "test_gate_token": "cfe8caa9ac",
-  "last_ec_updated_iso": "2026-02-18T23:05:22+00:00",
-  "last_had_alert": true
+  "last_ec_updated_iso": "",
+  "last_had_alert": false
 }
