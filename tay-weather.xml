@@ -6,7 +6,10 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260225233546</guid><pubDate>Wed, 25 Feb 2026 23:35:46 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
+<item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260226012518</guid><pubDate>Thu, 26 Feb 2026 01:25:18 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
+Issued: 8:25 PM EST Wednesday 25 February 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260225233546</guid><pubDate>Wed, 25 Feb 2026 23:35:46 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
 Issued: 6:35 PM EST Wednesday 25 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260225213334</guid><pubDate>Wed, 25 Feb 2026 21:33:34 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
@@ -77,9 +80,6 @@ Issued: 6:37 AM EST Tuesday 17 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WATCH - WINTER STORM (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260217040240</guid><pubDate>Tue, 17 Feb 2026 04:02:40 +0000</pubDate><description>YELLOW WATCH - WINTER STORM (Tay Township area)
 Issued: 11:02 PM EST Monday 16 February 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WATCH - WINTER STORM (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260216200157</guid><pubDate>Mon, 16 Feb 2026 20:01:57 +0000</pubDate><description>YELLOW WATCH - WINTER STORM (Tay Township area)
-Issued: 3:01 PM EST Monday 16 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
