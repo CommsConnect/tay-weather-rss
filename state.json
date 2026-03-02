@@ -393,6 +393,11 @@
       "decision": "denied",
       "decided_at": "2026-03-02T14:07:29Z",
       "reason": "expired"
+    },
+    "2663805d2d": {
+      "decision": "denied",
+      "decided_at": "2026-03-02T15:50:32Z",
+      "reason": "expired"
     }
   },
   "cooldowns": {
@@ -405,14 +410,6 @@
   "fb_last_posted_at": "2026-02-25T22:00:20.755279Z",
   "global_last_post_ts": 1772056834,
   "pending_approvals": {
-    "2663805d2d": {
-      "created_at": "2026-03-02T14:07:30Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - COLD ----- X (will post) -----\n\ud83d\udfe1 COLD warning in Tay Township\n\nWind chill values of -25 to -30.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe1 COLD warning in Tay Township\n\nWind chill values of -25 to -30.\n\nA little extra awareness helps everyone stay safe during changing conditions.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 643,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-03-02T14:07:30Z"
-    },
     "68ccf551a5": {
       "created_at": "2026-03-02T14:58:20Z",
       "preview_text": "\ud83d\udfe2 YELLOW WARNING - COLD ENDED ----- X (will post) -----\n\ud83d\udfe2 COLD ENDED warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 COLD ENDED warning in Tay Township\n\nConditions are improving and the alert has ended.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
