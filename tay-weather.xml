@@ -6,7 +6,13 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW WARNING - RAINFALL (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260307165426</guid><pubDate>Sat, 07 Mar 2026 16:54:26 +0000</pubDate><description>YELLOW WARNING - RAINFALL (Tay Township area)
+<item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260307172652</guid><pubDate>Sat, 07 Mar 2026 17:26:52 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
+Issued: 12:26 PM EST Saturday 7 March 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - RAINFALL (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260307173915</guid><pubDate>Sat, 07 Mar 2026 17:39:15 +0000</pubDate><description>YELLOW WARNING - RAINFALL (Tay Township area)
+Issued: 12:39 PM EST Saturday 7 March 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - RAINFALL (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260307165426</guid><pubDate>Sat, 07 Mar 2026 16:54:26 +0000</pubDate><description>YELLOW WARNING - RAINFALL (Tay Township area)
 Issued: 11:54 AM EST Saturday 7 March 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260307162133</guid><pubDate>Sat, 07 Mar 2026 16:21:33 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
@@ -74,12 +80,6 @@ Issued: 1:55 PM EST Wednesday 25 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260225174605</guid><pubDate>Wed, 25 Feb 2026 17:46:05 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
 Issued: 12:46 PM EST Wednesday 25 February 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260225160708</guid><pubDate>Wed, 25 Feb 2026 16:07:08 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
-Issued: 11:07 AM EST Wednesday 25 February 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260224210757</guid><pubDate>Tue, 24 Feb 2026 21:07:57 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
-Issued: 4:07 PM EST Tuesday 24 February 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
