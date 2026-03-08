@@ -451,6 +451,11 @@
       "decision": "denied",
       "decided_at": "2026-03-07T19:46:36Z",
       "reason": "expired"
+    },
+    "3e9beea3ba": {
+      "decision": "denied",
+      "decided_at": "2026-03-08T05:31:05Z",
+      "reason": "expired"
     }
   },
   "cooldowns": {
@@ -462,16 +467,7 @@
   "fb_cooldown_until": "2026-03-07T21:32:52.861817Z",
   "fb_last_posted_at": "2026-03-07T20:32:52.861817Z",
   "global_last_post_ts": 1772915599,
-  "pending_approvals": {
-    "3e9beea3ba": {
-      "created_at": "2026-03-07T19:46:37Z",
-      "preview_text": "\ud83d\udea8 YELLOW WARNING - RAINFALL ----- X (will post) -----\n\ud83d\udfe1 RAINFALL warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nA quick check of weather and road conditions can help you make safer choices.\n\n----- Facebook (will post) -----\n\ud83d\udfe1 RAINFALL warning in Tay Township\n\nTotal rainfall amounts of 50 to 65 mm with locally higher amounts possible due to thunderstorms. Substantial snow melt contributing to ponding on roads and low lying areas.\nContinuing through this evening.\n\nA quick check of weather and road conditions can help you make safer choices.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 721,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-03-07T19:46:37Z"
-    }
-  },
+  "pending_approvals": {},
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260122223237",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260208010154",
