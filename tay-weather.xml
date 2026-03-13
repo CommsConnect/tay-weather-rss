@@ -6,7 +6,10 @@
 <description> Automated Environment Canada weather alerts and statements for Tay Township and surrounding areas. </description>
 <language>en-ca</language>
 <lastBuildDate>Sat, 03 Jan 2026 17:51:08 +0000</lastBuildDate>
-<item><title>YELLOW WARNING - RAINFALL ENDED (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260311201704</guid><pubDate>Wed, 11 Mar 2026 20:17:04 +0000</pubDate><description>YELLOW WARNING - RAINFALL ENDED (Tay Township area)
+<item><title>SPECIAL WEATHER STATEMENT (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w1:20260313091538</guid><pubDate>Fri, 13 Mar 2026 09:15:38 +0000</pubDate><description>SPECIAL WEATHER STATEMENT (Tay Township area)
+Issued: 5:15 AM EDT Friday 13 March 2026
+More info (Tay Township): https://tayweather.short.gy/alert
+Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - RAINFALL ENDED (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260311201704</guid><pubDate>Wed, 11 Mar 2026 20:17:04 +0000</pubDate><description>YELLOW WARNING - RAINFALL ENDED (Tay Township area)
 Issued: 4:17 PM EDT Wednesday 11 March 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW WARNING - RAINFALL (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260311155931</guid><pubDate>Wed, 11 Mar 2026 15:59:31 +0000</pubDate><description>YELLOW WARNING - RAINFALL (Tay Township area)
@@ -77,9 +80,6 @@ Issued: 8:42 AM EST Saturday 7 March 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260307124827</guid><pubDate>Sat, 07 Mar 2026 12:48:27 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
 Issued: 7:48 AM EST Saturday 7 March 2026
-More info (Tay Township): https://tayweather.short.gy/alert
-Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item><item><title>YELLOW ADVISORY - FOG (Tay Township area)</title><link>https://tayweather.short.gy/alert</link><guid isPermaLink="false">tag:weather.gc.ca,2013-04-16:onrm94_w2:20260307115613</guid><pubDate>Sat, 07 Mar 2026 11:56:13 +0000</pubDate><description>YELLOW ADVISORY - FOG (Tay Township area)
-Issued: 6:56 AM EST Saturday 7 March 2026
 More info (Tay Township): https://tayweather.short.gy/alert
 Official alert details: https://weather.gc.ca/warnings/report_e.html?onrm94</description></item></channel>
 </rss>
