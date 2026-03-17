@@ -537,6 +537,11 @@
       "decision": "denied",
       "decided_at": "2026-03-17T16:36:12Z",
       "reason": "expired"
+    },
+    "c10f714b74": {
+      "decision": "denied",
+      "decided_at": "2026-03-17T17:58:22Z",
+      "reason": "expired"
     }
   },
   "cooldowns": {
@@ -548,16 +553,7 @@
   "fb_cooldown_until": "2026-03-17T01:01:59.504708Z",
   "fb_last_posted_at": "2026-03-17T00:01:59.504708Z",
   "global_last_post_ts": 1773705732,
-  "pending_approvals": {
-    "c10f714b74": {
-      "created_at": "2026-03-17T16:36:13Z",
-      "preview_text": "\ud83d\udfe2 YELLOW WARNING - SNOW SQUALL ENDED ----- X (will post) -----\n\ud83d\udfe2 SNOW SQUALL ENDED warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 SNOW SQUALL ENDED warning in Tay Township\n\nThe warning has ended. Thank you for staying weather-aware.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 1685,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-03-17T16:36:13Z"
-    }
-  },
+  "pending_approvals": {},
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260118214404",
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260104220744",
