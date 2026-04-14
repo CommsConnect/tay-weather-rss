@@ -647,6 +647,11 @@
       "decision": "denied",
       "decided_at": "2026-04-14T16:37:32Z",
       "reason": "expired"
+    },
+    "4aea787e13": {
+      "decision": "denied",
+      "decided_at": "2026-04-14T18:05:15Z",
+      "reason": "expired"
     }
   },
   "cooldowns": {
@@ -658,16 +663,7 @@
   "fb_cooldown_until": "2026-04-12T13:25:16.627642Z",
   "fb_last_posted_at": "2026-04-12T12:25:16.627642Z",
   "global_last_post_ts": 1775996726,
-  "pending_approvals": {
-    "4aea787e13": {
-      "created_at": "2026-04-14T16:37:33Z",
-      "preview_text": "\ud83d\udfe2 YELLOW WARNING - RAINFALL ENDED ----- X (will post) -----\n\ud83d\udfe2 RAINFALL ENDED warning in Tay Township\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\n----- Facebook (will post) -----\n\ud83d\udfe2 RAINFALL ENDED warning in Tay Township\n\nConditions have improved and the alert is no longer in effect.\n\nEnvironment Canada\nMore: https://tayweather.short.gy/alert\n#TayTownship #ONStorm\n\nAlert type: WARNING\n\nMore:\nhttps://tayweather.short.gy/alert",
-      "kind": "warning",
-      "buttons_message_id": 2397,
-      "buttons_chat_id": "-1003608973431",
-      "last_preview_sent_at": "2026-04-14T16:37:33Z"
-    }
-  },
+  "pending_approvals": {},
   "posted_guids": [
     "tag:weather.gc.ca,2013-04-16:onrm94_w1:20260127224829",
     "tag:weather.gc.ca,2013-04-16:onrm94_w2:20260218021543",
